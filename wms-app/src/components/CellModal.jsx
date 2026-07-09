@@ -12,11 +12,11 @@ export default function CellModal({
 
   // Tabs / Cell Type state
   const [isObstacle, setIsObstacle] = useState(cellData.isObstacle || false);
+  const [isPath, setIsPath] = useState(cellData.isPath || false);
   const [obstacleType, setObstacleType] = useState(cellData.obstacleType || 'pillar');
 
   // Custom capacity & alerts states
-  const [maxPallets, setMaxPallets] = useState(cellData.maxPallets !== undefined ? cellData.maxPallets : 8.0);
-  const [maxVolume, setMaxVolume] = useState(cellData.maxVolume !== undefined ? cellData.maxVolume : 100);
+  const [maxPallets, setMaxPallets] = useState(cellData.maxPallets !== undefined ? cellData.maxPallets : 8);
   const [minThreshold, setMinThreshold] = useState(cellData.minThreshold !== undefined ? cellData.minThreshold : '');
 
   // Form states (Products)
@@ -53,9 +53,9 @@ export default function CellModal({
   useEffect(() => {
     setCategory(cellData.category || '');
     setIsObstacle(cellData.isObstacle || false);
+    setIsPath(cellData.isPath || false);
     setObstacleType(cellData.obstacleType || 'pillar');
-    setMaxPallets(cellData.maxPallets !== undefined ? cellData.maxPallets : 8.0);
-    setMaxVolume(cellData.maxVolume !== undefined ? cellData.maxVolume : 100);
+    setMaxPallets(cellData.maxPallets !== undefined ? cellData.maxPallets : 8);
     setMinThreshold(cellData.minThreshold !== undefined ? cellData.minThreshold : '');
     resetForm();
   }, [cellData, resetForm]);
@@ -66,9 +66,11 @@ export default function CellModal({
       category: updatedCategory !== undefined ? updatedCategory : category,
       products: updatedProducts !== undefined ? updatedProducts : cellData.products || [],
       isObstacle: extraProps.isObstacle !== undefined ? extraProps.isObstacle : isObstacle,
+      isPath: extraProps.isPath !== undefined ? extraProps.isPath : isPath,
+      rowSpan: cellData.rowSpan,
+      colSpan: cellData.colSpan,
       obstacleType: extraProps.obstacleType !== undefined ? extraProps.obstacleType : obstacleType,
       maxPallets: extraProps.maxPallets !== undefined ? extraProps.maxPallets : maxPallets,
-      maxVolume: extraProps.maxVolume !== undefined ? extraProps.maxVolume : maxVolume,
       minThreshold: extraProps.minThreshold !== undefined ? extraProps.minThreshold : minThreshold
     });
   };
@@ -177,6 +179,7 @@ export default function CellModal({
     // Save as obstacle: clearing products and category
     triggerSave([], '', {
       isObstacle: true,
+      isPath: false,
       obstacleType: obstacleType
     });
   };
@@ -185,7 +188,25 @@ export default function CellModal({
     setIsObstacle(false);
     triggerSave([], '', {
       isObstacle: false,
+      isPath: false,
       obstacleType: 'pillar'
+    });
+  };
+
+  const handlePathSubmit = (e) => {
+    e.preventDefault();
+    // Save as path: clearing products and category
+    triggerSave([], '', {
+      isPath: true,
+      isObstacle: false
+    });
+  };
+
+  const handleRemovePath = () => {
+    setIsPath(false);
+    triggerSave([], '', {
+      isPath: false,
+      isObstacle: false
     });
   };
 
@@ -193,27 +214,20 @@ export default function CellModal({
     e.preventDefault();
     setError('');
 
-    const maxPal = parseFloat(maxPallets);
+    const maxPal = parseInt(maxPallets, 10);
     if (isNaN(maxPal) || maxPal <= 0) {
-      setError('Max pallets capacity must be a positive number.');
+      setError('Max pallets capacity must be a positive integer.');
       return;
     }
 
-    const maxVol = parseFloat(maxVolume);
-    if (isNaN(maxVol) || maxVol <= 0) {
-      setError('Max volume capacity must be a positive number.');
-      return;
-    }
-
-    const minThresh = minThreshold === '' ? undefined : parseFloat(minThreshold);
+    const minThresh = minThreshold === '' ? undefined : parseInt(minThreshold, 10);
     if (minThresh !== undefined && (isNaN(minThresh) || minThresh < 0)) {
-      setError('Minimum stock threshold must be a non-negative number.');
+      setError('Minimum stock threshold must be a non-negative integer.');
       return;
     }
 
     triggerSave(undefined, undefined, {
       maxPallets: maxPal,
-      maxVolume: maxVol,
       minThreshold: minThresh
     });
   };
@@ -234,9 +248,11 @@ export default function CellModal({
             <h3 style={styles.title}>
               {cellData.isObstacle 
                 ? `Obstacle Cell: ${obstacleType.toUpperCase()}`
-                : isCellEmpty 
-                  ? 'Unassigned Storage Cell' 
-                  : `Storage Category: ${cellData.category}`}
+                : cellData.isPath
+                  ? 'Path / Roadway'
+                  : isCellEmpty 
+                    ? 'Unassigned Storage Cell' 
+                    : `Storage Category: ${cellData.category}`}
             </h3>
           </div>
           <button className="btn-icon" onClick={onClose}>
@@ -253,9 +269,9 @@ export default function CellModal({
             type="button"
             style={{
               ...styles.tabButton,
-              ...(!isObstacle ? styles.activeTabButton : {})
+              ...(!isObstacle && !isPath ? styles.activeTabButton : {})
             }}
-            onClick={() => setIsObstacle(false)}
+            onClick={() => { setIsObstacle(false); setIsPath(false); }}
           >
             📦 Storage Cell
           </button>
@@ -263,9 +279,19 @@ export default function CellModal({
             type="button"
             style={{
               ...styles.tabButton,
+              ...(isPath ? styles.activeTabButton : {})
+            }}
+            onClick={() => { setIsObstacle(false); setIsPath(true); }}
+          >
+            🛣️ Path / Roadway
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.tabButton,
               ...(isObstacle ? styles.activeTabButton : {})
             }}
-            onClick={() => setIsObstacle(true)}
+            onClick={() => { setIsObstacle(true); setIsPath(false); }}
           >
             🚧 Obstacle Status
           </button>
@@ -319,6 +345,47 @@ export default function CellModal({
                       type="button"
                       className="btn btn-secondary"
                       onClick={handleRemoveObstacle}
+                      style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    >
+                      Convert to Storage Cell
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : isPath ? (
+          /* Path Configuration View */
+          <div style={styles.obstacleBody} className="animate-fade-in">
+            <div style={styles.obstacleCard} className="card glass">
+              <div style={styles.obstacleIconWrapper}>
+                <span style={styles.obstacleIconLarge}>🛣️</span>
+              </div>
+              <h4 style={styles.obstacleHeading}>Configure Cell as Path / Roadway</h4>
+              <p style={styles.obstacleDescription}>
+                Marking this slot as a path designates it as a transit corridor for forklifts and personnel. Placing products on pathways is strictly prohibited.
+              </p>
+
+              {!isCellEmpty && (
+                <div className="badge-danger" style={styles.obstacleWarning}>
+                  ⚠️ <strong>Warning:</strong> Cell currently stores products. Saving it as a path will <strong>clear all inventory variants</strong> stored here.
+                </div>
+              )}
+
+              <form onSubmit={handlePathSubmit} style={styles.obstacleForm}>
+                <div style={styles.formActions}>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                  >
+                    Save Path Configuration
+                  </button>
+                  {cellData.isPath && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleRemovePath}
                       style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
                     >
                       Convert to Storage Cell
@@ -438,21 +505,10 @@ export default function CellModal({
                       <label className="input-label">Max Pallets Capacity</label>
                       <input
                         type="number"
-                        step="0.1"
+                        step="1"
                         className="input-field"
                         value={maxPallets}
                         onChange={(e) => setMaxPallets(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="input-group" style={{ flex: 1 }}>
-                      <label className="input-label">Max Volume (m³)</label>
-                      <input
-                        type="number"
-                        step="1"
-                        className="input-field"
-                        value={maxVolume}
-                        onChange={(e) => setMaxVolume(e.target.value)}
                         required
                       />
                     </div>
@@ -462,9 +518,9 @@ export default function CellModal({
                     <label className="input-label">Low Stock Alarm Threshold (Pallets)</label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="1"
                       className="input-field"
-                      placeholder="e.g. 2.0 (Leaves cell border red if stock falls below this)"
+                      placeholder="e.g. 2 (Leaves cell border red if stock falls below this)"
                       value={minThreshold}
                       onChange={(e) => setMinThreshold(e.target.value)}
                     />
@@ -578,7 +634,7 @@ export default function CellModal({
                 {/* Pallet Live Calculator Indicator */}
                 {itemsPerPallet > 0 && stock >= 0 && (
                   <div style={styles.calculatorOutput} className="badge badge-primary">
-                    Conversion calculation: {stock} units / {itemsPerPallet} per Pallet = <strong>{calculatePallets(stock, itemsPerPallet).toFixed(2)} Pallets</strong>
+                    Conversion calculation: {stock} units / {itemsPerPallet} per Pallet = <strong>{calculatePallets(stock, itemsPerPallet)} Pallets</strong>
                   </div>
                 )}
 

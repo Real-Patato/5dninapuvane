@@ -16,13 +16,13 @@ export default function CreateWarehouseModal({ onClose, onCreate, onEdit, wareho
       return;
     }
 
-    if (rows < 1 || rows > 10) {
-      setError('Rows must be between 1 and 10.');
+    if (rows < 1 || rows > 30) {
+      setError('Rows must be between 1 and 30.');
       return;
     }
 
-    if (columns < 1 || columns > 12) {
-      setError('Columns must be between 1 and 12.');
+    if (columns < 1 || columns > 30) {
+      setError('Columns must be between 1 and 30.');
       return;
     }
 
@@ -77,12 +77,12 @@ export default function CreateWarehouseModal({ onClose, onCreate, onEdit, wareho
 
             <div style={styles.dimensionsRow}>
               <div className="input-group" style={{ flex: 1 }}>
-                <label className="input-label">Vertical Rows (Max 10)</label>
+                <label className="input-label">Vertical Rows (Max 30)</label>
                 <input
                   type="number"
                   className="input-field"
                   min="1"
-                  max="10"
+                  max="30"
                   value={rows}
                   onChange={(e) => setRows(e.target.value)}
                   required
@@ -91,12 +91,12 @@ export default function CreateWarehouseModal({ onClose, onCreate, onEdit, wareho
               </div>
 
               <div className="input-group" style={{ flex: 1 }}>
-                <label className="input-label">Horizontal Columns (Max 12)</label>
+                <label className="input-label">Horizontal Columns (Max 30)</label>
                 <input
                   type="number"
                   className="input-field"
                   min="1"
-                  max="12"
+                  max="30"
                   value={columns}
                   onChange={(e) => setColumns(e.target.value)}
                   required

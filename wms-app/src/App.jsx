@@ -141,6 +141,13 @@ export default function App() {
     setWarehouseToEdit(null);
   };
 
+  const handleUpdateWarehouse = (updatedWh) => {
+    const updated = warehouses.map(wh => wh.id === updatedWh.id ? updatedWh : wh);
+    setWarehouses(updated);
+    saveWarehouses(updated);
+    setSelectedWarehouse(updatedWh);
+  };
+
   const handleSaveCellData = (coordinate, cellInfo) => {
     if (!selectedWarehouse) return;
 
@@ -204,6 +211,7 @@ export default function App() {
               setWarehouseToEdit(selectedWarehouse);
               setIsCreateWarehouseOpen(true);
             }}
+            onUpdateWarehouse={handleUpdateWarehouse}
           />
         ) : (
           <CustomFieldsConfig

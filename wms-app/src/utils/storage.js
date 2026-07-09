@@ -91,6 +91,9 @@ export const updateCellProducts = (warehouseId, coordinate, cellInfo) => {
         (!cellInfo.products || cellInfo.products.length === 0) &&
         !cellInfo.category &&
         !cellInfo.isObstacle &&
+        !cellInfo.isPath &&
+        !cellInfo.rowSpan &&
+        !cellInfo.colSpan &&
         cellInfo.maxPallets === undefined &&
         cellInfo.minThreshold === undefined
       )) {

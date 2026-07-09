@@ -33,7 +33,7 @@ export const DEFAULT_CUSTOM_FIELDS = [
 // Helper to calculate total pallets
 export const calculatePallets = (stock, itemsPerPallet) => {
   if (!itemsPerPallet || itemsPerPallet <= 0) return 0;
-  return parseFloat((stock / itemsPerPallet).toFixed(2));
+  return Math.ceil(stock / itemsPerPallet);
 };
 
 // Default pre-populated warehouses
