@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import React, { useState, useEffect, useCallback } from 'react';
-=======
-import React, { useState, useEffect } from 'react';
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
 import { calculatePallets } from '../utils/mockData';
 
 export default function CellModal({
@@ -14,7 +10,6 @@ export default function CellModal({
 }) {
   const isCellEmpty = !cellData.products || cellData.products.length === 0;
 
-<<<<<<< HEAD
   // Tabs / Cell Type state
   const [isObstacle, setIsObstacle] = useState(cellData.isObstacle || false);
   const [obstacleType, setObstacleType] = useState(cellData.obstacleType || 'pillar');
@@ -25,9 +20,6 @@ export default function CellModal({
   const [minThreshold, setMinThreshold] = useState(cellData.minThreshold !== undefined ? cellData.minThreshold : '');
 
   // Form states (Products)
-=======
-  // Form states
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const [category, setCategory] = useState(cellData.category || '');
   const [editingProductId, setEditingProductId] = useState(null);
   const [name, setName] = useState('');
@@ -40,17 +32,7 @@ export default function CellModal({
   const [customFieldsValues, setCustomFieldsValues] = useState({});
   const [error, setError] = useState('');
 
-<<<<<<< HEAD
   const resetForm = useCallback(() => {
-=======
-  // Sync state if cellData changes
-  useEffect(() => {
-    setCategory(cellData.category || '');
-    resetForm();
-  }, [cellData]);
-
-  const resetForm = () => {
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     setEditingProductId(null);
     setName('');
     setPrice('');
@@ -65,7 +47,6 @@ export default function CellModal({
     });
     setCustomFieldsValues(initialVals);
     setError('');
-<<<<<<< HEAD
   }, [customFields]);
 
   // Sync state if cellData changes
@@ -90,8 +71,6 @@ export default function CellModal({
       maxVolume: extraProps.maxVolume !== undefined ? extraProps.maxVolume : maxVolume,
       minThreshold: extraProps.minThreshold !== undefined ? extraProps.minThreshold : minThreshold
     });
-=======
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   };
 
   const handleEditClick = (product) => {
@@ -180,11 +159,7 @@ export default function CellModal({
     }
 
     // Call save handler
-<<<<<<< HEAD
     triggerSave(productsList, finalCategory);
-=======
-    onSaveCellData(coordinate, finalCategory, productsList);
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     resetForm();
   };
 
@@ -193,7 +168,6 @@ export default function CellModal({
     
     // If we have deleted all products, we clear the category too
     const finalCategory = productsList.length === 0 ? '' : cellData.category;
-<<<<<<< HEAD
     triggerSave(productsList, finalCategory);
     resetForm();
   };
@@ -244,12 +218,6 @@ export default function CellModal({
     });
   };
 
-=======
-    onSaveCellData(coordinate, finalCategory, productsList);
-    resetForm();
-  };
-
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const cleanCoord = coordinate.replace('-', '');
 
   return (
@@ -264,15 +232,11 @@ export default function CellModal({
           <div>
             <span className="badge badge-primary" style={styles.cellBadge}>Cell {cleanCoord}</span>
             <h3 style={styles.title}>
-<<<<<<< HEAD
               {cellData.isObstacle 
                 ? `Obstacle Cell: ${obstacleType.toUpperCase()}`
                 : isCellEmpty 
                   ? 'Unassigned Storage Cell' 
                   : `Storage Category: ${cellData.category}`}
-=======
-              {isCellEmpty ? 'Unassigned Storage Cell' : `Storage Category: ${cellData.category}`}
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
             </h3>
           </div>
           <button className="btn-icon" onClick={onClose}>
@@ -283,7 +247,6 @@ export default function CellModal({
           </button>
         </div>
 
-<<<<<<< HEAD
         {/* Tab Selection */}
         <div style={styles.tabContainer}>
           <button
@@ -670,260 +633,6 @@ export default function CellModal({
             </div>
           </div>
         )}
-=======
-        <div className="modal-body" style={styles.body}>
-          {/* Active Product Variants Grid/List */}
-          <div style={styles.variantsSection}>
-            <h4 style={styles.sectionHeading}>Stored Product Variants</h4>
-            {isCellEmpty ? (
-              <div style={styles.emptyState}>
-                <p>No products stored in cell {cleanCoord}.</p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Complete the form below to stock this cell.
-                </p>
-              </div>
-            ) : (
-              <div style={styles.variantsList}>
-                {cellData.products.map((prod) => {
-                  const pallets = calculatePallets(prod.stock, prod.itemsPerPallet);
-                  return (
-                    <div
-                      key={prod.id}
-                      style={{
-                        ...styles.productCard,
-                        border: editingProductId === prod.id ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                        backgroundColor: editingProductId === prod.id ? 'rgba(59, 130, 246, 0.04)' : 'rgba(0, 0, 0, 0.1)'
-                      }}
-                      className="card"
-                    >
-                      <div style={styles.prodHeader}>
-                        <div>
-                          <h5 style={styles.prodName}>{prod.name}</h5>
-                          <span style={styles.prodPrice}>${prod.price.toFixed(2)} / unit</span>
-                        </div>
-                        <div style={styles.prodActions}>
-                          <button
-                            onClick={() => handleEditClick(prod)}
-                            className="btn btn-icon"
-                            style={styles.actionBtn}
-                            title="Edit Variant"
-                          >
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDeleteProduct(prod.id)}
-                            className="btn btn-icon"
-                            style={{ ...styles.actionBtn, color: 'var(--danger)' }}
-                            title="Remove Variant"
-                          >
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Pallet conversion calculation */}
-                      <div style={styles.metricsGrid}>
-                        <div style={styles.metricItem}>
-                          <span style={styles.metricLabel}>Stock Qty</span>
-                          <span style={styles.metricVal}>{prod.stock} units</span>
-                        </div>
-                        <div style={styles.metricItem}>
-                          <span style={styles.metricLabel}>Pallet Ratio</span>
-                          <span style={styles.metricVal}>{prod.itemsPerPallet} u/Pallet</span>
-                        </div>
-                        <div style={styles.metricItem}>
-                          <span style={styles.metricLabel}>Calculated Load</span>
-                          <span style={{ ...styles.metricVal, color: 'var(--primary)', fontWeight: 'bold' }}>
-                            {pallets.toFixed(2)} Pallets
-                          </span>
-                        </div>
-                        <div style={styles.metricItem}>
-                          <span style={styles.metricLabel}>Expiration</span>
-                          <span style={styles.metricVal}>{prod.expirationDate}</span>
-                        </div>
-                      </div>
-
-                      {/* Custom metadata display */}
-                      {Object.keys(prod.customFields || {}).length > 0 && (
-                        <div style={styles.customValuesBox}>
-                          {customFields.map(field => {
-                            const val = prod.customFields[field.id];
-                            if (val === undefined || val === '') return null;
-                            return (
-                              <div key={field.id} style={styles.customValRow}>
-                                <span style={styles.customValLabel}>{field.label}:</span>
-                                <span style={styles.customValVal}>{val}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Form to Add / Edit Product */}
-          <div style={styles.formSection}>
-            <h4 style={styles.sectionHeading}>
-              {editingProductId ? 'Edit Product Variant' : 'Add Product Variant'}
-            </h4>
-            
-            {error && <div className="badge-danger" style={styles.errorAlert}>{error}</div>}
-
-            <form onSubmit={handleFormSubmit} style={styles.form}>
-              {/* Category selector (Only editable on first product) */}
-              <div className="input-group">
-                <label className="input-label">Cell Category</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="e.g. Milk, Electronics, Beverages"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  disabled={!isCellEmpty}
-                  required
-                />
-                {!isCellEmpty && (
-                  <span style={styles.inputHint}>
-                    This cell strictly stores <strong>{cellData.category}</strong>. Delete all products to reassign category.
-                  </span>
-                )}
-              </div>
-
-              {/* Product Name */}
-              <div className="input-group">
-                <label className="input-label">Product Name / Variant</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="e.g. Almond Milk Unsweetened 1L"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-
-              {/* Price & Items per Pallet */}
-              <div style={styles.formRow}>
-                <div className="input-group" style={{ flex: 1 }}>
-                  <label className="input-label">Price per Unit ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="input-field"
-                    placeholder="0.00"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="input-group" style={{ flex: 1 }}>
-                  <label className="input-label">Units per Pallet</label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="e.g. 50"
-                    value={itemsPerPallet}
-                    onChange={(e) => setItemsPerPallet(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Stock and Expiration Date */}
-              <div style={styles.formRow}>
-                <div className="input-group" style={{ flex: 1 }}>
-                  <label className="input-label">Total Stock Quantity</label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="e.g. 150"
-                    value={stock}
-                    onChange={(e) => setStock(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="input-group" style={{ flex: 1 }}>
-                  <label className="input-label">Expiration Date</label>
-                  <input
-                    type="date"
-                    className="input-field"
-                    value={expirationDate}
-                    onChange={(e) => setExpirationDate(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Pallet Live Calculator Indicator */}
-              {itemsPerPallet > 0 && stock >= 0 && (
-                <div style={styles.calculatorOutput} className="badge badge-primary">
-                  Conversion calculation: {stock} units / {itemsPerPallet} per Pallet = <strong>{calculatePallets(stock, itemsPerPallet).toFixed(2)} Pallets</strong>
-                </div>
-              )}
-
-              {/* Dynamic Custom Fields Section */}
-              {customFields.length > 0 && (
-                <div style={styles.customFieldsSection}>
-                  <div style={styles.customFieldsDivider}>
-                    <span style={styles.dividerText}>Custom Metadata Fields</span>
-                  </div>
-                  
-                  <div style={styles.customFieldsFormGrid}>
-                    {customFields.map(field => (
-                      <div key={field.id} className="input-group">
-                        <label className="input-label">
-                          {field.label}
-                          {field.description && <span style={styles.fieldDescTip} title={field.description}> (?)</span>}
-                        </label>
-                        <input
-                          type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                          className="input-field"
-                          placeholder={`Enter ${field.label}`}
-                          value={customFieldsValues[field.id] || ''}
-                          onChange={(e) => handleCustomFieldChange(field.id, e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div style={styles.formActions}>
-                {editingProductId && (
-                  <button
-                    type="button"
-                    onClick={resetForm}
-                    className="btn btn-secondary"
-                    style={{ flex: 1 }}
-                  >
-                    Cancel Edit
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ flex: 2 }}
-                >
-                  {editingProductId ? 'Save Variant Changes' : 'Stock Variant'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       </div>
     </div>
   );
@@ -933,11 +642,7 @@ const styles = {
   modal: {
     maxWidth: '850px',
     display: 'grid',
-<<<<<<< HEAD
     gridTemplateRows: 'auto auto 1fr'
-=======
-    gridTemplateRows: 'auto 1fr'
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   },
   cellBadge: {
     marginBottom: '0.25rem',
@@ -951,7 +656,6 @@ const styles = {
     fontWeight: '600',
     color: 'var(--text-primary)'
   },
-<<<<<<< HEAD
   tabContainer: {
     display: 'flex',
     borderBottom: '1px solid var(--border-color)',
@@ -982,24 +686,12 @@ const styles = {
     gap: '2rem',
     padding: '1.5rem',
     maxHeight: '70vh',
-=======
-  body: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '2rem',
-    padding: '1.5rem',
-    maxHeight: '75vh',
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     overflowY: 'auto'
   },
   variantsSection: {
     display: 'flex',
     flexDirection: 'column',
-<<<<<<< HEAD
     gap: '1.25rem',
-=======
-    gap: '1rem',
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     borderRight: '1px solid var(--border-color)',
     paddingRight: '1.5rem'
   },
@@ -1012,11 +704,7 @@ const styles = {
     paddingBottom: '0.5rem'
   },
   emptyState: {
-<<<<<<< HEAD
     padding: '2.5rem 1rem',
-=======
-    padding: '3rem 1rem',
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     textAlign: 'center',
     color: 'var(--text-muted)',
     fontSize: '0.9rem'
@@ -1026,11 +714,7 @@ const styles = {
     flexDirection: 'column',
     gap: '1rem',
     overflowY: 'auto',
-<<<<<<< HEAD
     maxHeight: '35vh',
-=======
-    maxHeight: '55vh',
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     paddingRight: '0.25rem'
   },
   productCard: {
@@ -1165,7 +849,6 @@ const styles = {
     display: 'flex',
     gap: '0.75rem',
     marginTop: '1rem'
-<<<<<<< HEAD
   },
   configContainer: {
     marginTop: '1.25rem',
@@ -1242,7 +925,5 @@ const styles = {
   },
   obstacleSelect: {
     width: '100%'
-=======
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   }
 };

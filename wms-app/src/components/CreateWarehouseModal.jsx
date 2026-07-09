@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
 
-<<<<<<< HEAD
 export default function CreateWarehouseModal({ onClose, onCreate, onEdit, warehouseToEdit }) {
   const isEditing = !!warehouseToEdit;
   const [name, setName] = useState(warehouseToEdit ? warehouseToEdit.name : '');
   const [rows, setRows] = useState(warehouseToEdit ? warehouseToEdit.rows : 5);
   const [columns, setColumns] = useState(warehouseToEdit ? warehouseToEdit.columns : 6);
-=======
-export default function CreateWarehouseModal({ onClose, onCreate }) {
-  const [name, setName] = useState('');
-  const [rows, setRows] = useState(5);
-  const [columns, setColumns] = useState(6);
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const [error, setError] = useState('');
 
   const handleSubmit = (e) => {
@@ -33,7 +26,6 @@ export default function CreateWarehouseModal({ onClose, onCreate }) {
       return;
     }
 
-<<<<<<< HEAD
     const payload = {
       name: name.trim(),
       rows: parseInt(rows, 10),
@@ -45,13 +37,6 @@ export default function CreateWarehouseModal({ onClose, onCreate }) {
     } else {
       onCreate(payload);
     }
-=======
-    onCreate({
-      name: name.trim(),
-      rows: parseInt(rows, 10),
-      columns: parseInt(columns, 10)
-    });
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   };
 
   return (
@@ -62,13 +47,9 @@ export default function CreateWarehouseModal({ onClose, onCreate }) {
         style={styles.modal}
       >
         <div className="modal-header">
-<<<<<<< HEAD
           <h3 style={styles.title}>
             {isEditing ? 'Configure Workspace Layout' : 'Initialize New Warehouse'}
           </h3>
-=======
-          <h3 style={styles.title}>Initialize New Warehouse</h3>
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
           <button className="btn-icon" onClick={onClose} style={styles.closeBtn}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -127,11 +108,7 @@ export default function CreateWarehouseModal({ onClose, onCreate }) {
             <div style={styles.previewBox} className="card">
               <div style={styles.previewTitle}>Layout Grid Map Preview</div>
               <div style={styles.previewDescription}>
-<<<<<<< HEAD
                 This will {isEditing ? 'resize your' : 'initialize a'} grid of <strong>{rows * columns}</strong> storage cells, labeled from <strong>A-1</strong> up to <strong>{String.fromCharCode(64 + parseInt(rows || 1, 10))}-{columns}</strong>.
-=======
-                This will initialize a grid of <strong>{rows * columns}</strong> storage cells, labeled from <strong>A-1</strong> up to <strong>{String.fromCharCode(64 + parseInt(rows || 1, 10))}-{columns}</strong>.
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
               </div>
             </div>
           </div>
@@ -141,11 +118,7 @@ export default function CreateWarehouseModal({ onClose, onCreate }) {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary">
-<<<<<<< HEAD
               {isEditing ? 'Save Layout Settings' : 'Create Warehouse'}
-=======
-              Create Warehouse
->>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
             </button>
           </div>
         </form>

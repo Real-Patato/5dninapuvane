@@ -25,7 +25,7 @@ export default function App() {
   // Navigation & session states
   const [page, setPage] = useState('landing'); // 'landing', 'auth', 'dashboard'
   const [currentUser, setLocalCurrentUser] = useState(null);
-
+  
   // Data states
   const [warehouses, setWarehouses] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
@@ -33,12 +33,10 @@ export default function App() {
 
   // Dashboard Sub-navigation
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'custom-fields'
-
+  
   // Modals state
   const [isCreateWarehouseOpen, setIsCreateWarehouseOpen] = useState(false);
-
   const [warehouseToEdit, setWarehouseToEdit] = useState(null);
-
   const [selectedCellCoord, setSelectedCellCoord] = useState(null);
 
   // Theme states
@@ -110,13 +108,12 @@ export default function App() {
     };
 
     const updated = addWarehouse(newWh);
-
+    
     // Refresh states
     setWarehouses(updated);
     setSelectedWarehouse(newWh);
     setIsCreateWarehouseOpen(false);
   };
-
 
   const handleUpdateWarehouseLayout = (whData) => {
     if (!warehouseToEdit) return;
@@ -148,7 +145,6 @@ export default function App() {
     if (!selectedWarehouse) return;
 
     const updatedWhs = updateCellProducts(selectedWarehouse.id, coordinate, cellInfo);
-
     setWarehouses(updatedWhs);
 
     // Update active selected warehouse state
@@ -204,12 +200,10 @@ export default function App() {
           <WarehouseGrid
             warehouse={selectedWarehouse}
             onCellClick={(coord) => setSelectedCellCoord(coord)}
-
             onEditLayoutClick={() => {
               setWarehouseToEdit(selectedWarehouse);
               setIsCreateWarehouseOpen(true);
             }}
-
           />
         ) : (
           <CustomFieldsConfig
@@ -222,7 +216,6 @@ export default function App() {
       {/* Modals Overlay portals */}
       {isCreateWarehouseOpen && (
         <CreateWarehouseModal
-
           onClose={() => {
             setIsCreateWarehouseOpen(false);
             setWarehouseToEdit(null);
@@ -230,7 +223,6 @@ export default function App() {
           onCreate={handleCreateWarehouse}
           onEdit={handleUpdateWarehouseLayout}
           warehouseToEdit={warehouseToEdit}
-
         />
       )}
 
