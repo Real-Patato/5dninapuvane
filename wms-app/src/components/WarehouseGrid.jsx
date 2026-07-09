@@ -1,7 +1,11 @@
 import React from 'react';
 import { calculatePallets } from '../utils/mockData';
 
+<<<<<<< HEAD
 export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClick }) {
+=======
+export default function WarehouseGrid({ warehouse, onCellClick }) {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   if (!warehouse) {
     return (
       <div style={styles.emptyState}>
@@ -17,6 +21,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   // Generate columns (1, 2, 3...) based on columns count
   const colLabels = Array.from({ length: columns }, (_, i) => i + 1);
 
+<<<<<<< HEAD
   // Helper to get total pallets and properties in cell
   const getCellStats = (coordinate) => {
     const cell = cells[coordinate];
@@ -36,6 +41,13 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         obstacleType, 
         minThreshold 
       };
+=======
+  // Helper to get total pallets in cell
+  const getCellStats = (coordinate) => {
+    const cell = cells[coordinate];
+    if (!cell || !cell.products || cell.products.length === 0) {
+      return { category: 'Empty', pallets: 0, count: 0 };
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     }
     const pallets = cell.products.reduce((acc, prod) => {
       return acc + calculatePallets(prod.stock, prod.itemsPerPallet);
@@ -43,11 +55,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     return {
       category: cell.category || 'Unassigned',
       pallets: parseFloat(pallets.toFixed(2)),
+<<<<<<< HEAD
       count: cell.products.length,
       maxPallets: maxPal,
       isObstacle,
       obstacleType,
       minThreshold
+=======
+      count: cell.products.length
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     };
   };
 
@@ -55,13 +71,17 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   let totalPallets = 0;
   let occupiedCellsCount = 0;
   let totalProductsCount = 0;
+<<<<<<< HEAD
   let obstacleCellsCount = 0;
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const totalCellsCount = rows * columns;
 
   rowLabels.forEach(row => {
     colLabels.forEach(col => {
       const coord = `${row}-${col}`;
       const stats = getCellStats(coord);
+<<<<<<< HEAD
       if (stats.isObstacle) {
         obstacleCellsCount++;
       } else {
@@ -70,10 +90,17 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
           occupiedCellsCount++;
           totalProductsCount += stats.count;
         }
+=======
+      totalPallets += stats.pallets;
+      if (stats.count > 0) {
+        occupiedCellsCount++;
+        totalProductsCount += stats.count;
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       }
     });
   });
 
+<<<<<<< HEAD
   const storageCellsCount = totalCellsCount - obstacleCellsCount;
   const cellOccupancyRate = Math.round((occupiedCellsCount / (storageCellsCount || 1)) * 100) || 0;
 
@@ -102,6 +129,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       };
     }
 
+=======
+  const cellOccupancyRate = Math.round((occupiedCellsCount / totalCellsCount) * 100) || 0;
+
+  // Helper to determine status color and intensity based on pallet load
+  const getCapacityStyles = (pallets) => {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     if (pallets === 0) {
       return {
         bg: 'rgba(255, 255, 255, 0.02)',
@@ -111,11 +144,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         badgeClass: 'badge-neutral'
       };
     }
+<<<<<<< HEAD
 
     // Dynamic capacity classification based on percentage of maxPallets
     const utilization = pallets / maxPallets;
 
     if (utilization <= 0.25) { // Low capacity
+=======
+    if (pallets <= 2.0) {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       return {
         bg: 'rgba(96, 165, 250, 0.08)',
         border: 'rgba(96, 165, 250, 0.3)',
@@ -124,7 +161,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         badgeClass: 'badge-primary'
       };
     }
+<<<<<<< HEAD
     if (utilization <= 0.56) { // Med capacity
+=======
+    if (pallets <= 4.5) {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       return {
         bg: 'rgba(16, 185, 129, 0.08)',
         border: 'rgba(16, 185, 129, 0.3)',
@@ -133,7 +174,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         badgeClass: 'badge-success'
       };
     }
+<<<<<<< HEAD
     if (utilization <= 1.0) { // High capacity
+=======
+    if (pallets <= 8.0) {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       return {
         bg: 'rgba(245, 158, 11, 0.1)',
         border: 'rgba(245, 158, 11, 0.4)',
@@ -142,7 +187,10 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         badgeClass: 'badge-warning'
       };
     }
+<<<<<<< HEAD
     // Full (>100% capacity)
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     return {
       bg: 'rgba(239, 68, 68, 0.12)',
       border: 'rgba(239, 68, 68, 0.5)',
@@ -157,6 +205,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       {/* Top Header Panel */}
       <div style={styles.gridHeader}>
         <div style={styles.headerInfo}>
+<<<<<<< HEAD
           <div style={styles.headerTitleRow}>
             <h2 style={styles.gridName}>{name} Layout View</h2>
             <button
@@ -172,6 +221,9 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
               Edit Layout
             </button>
           </div>
+=======
+          <h2 style={styles.gridName}>{name} Layout View</h2>
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
           <p style={styles.gridSubtext}>
             Interactive floor plan mapping. Click any storage cell coordinate below to edit its product variants and custom parameters.
           </p>
@@ -179,7 +231,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
         {/* Legend */}
         <div style={styles.legend} className="card glass">
+<<<<<<< HEAD
           <span style={styles.legendTitle}>Capacity & Indicators:</span>
+=======
+          <span style={styles.legendTitle}>Cell Capacity:</span>
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
           <div style={styles.legendItems}>
             <div style={styles.legendItem}>
               <span style={{ ...styles.legendDot, backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)' }}></span>
@@ -187,6 +243,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
             </div>
             <div style={styles.legendItem}>
               <span style={{ ...styles.legendDot, backgroundColor: 'rgba(96, 165, 250, 0.2)', border: '1px solid #60a5fa' }}></span>
+<<<<<<< HEAD
               <span>Low (&le;25%)</span>
             </div>
             <div style={styles.legendItem}>
@@ -212,6 +269,21 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
             <div style={styles.legendItem}>
               <span className="low-stock-legend-dot" style={{ ...styles.legendDot, backgroundColor: 'rgba(239, 68, 68, 0.35)', border: '1.5px solid var(--danger)' }}></span>
               <span style={{ color: 'var(--danger)', fontWeight: 'bold' }}>🚨 Low Stock Alert</span>
+=======
+              <span>Low (≤2)</span>
+            </div>
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, backgroundColor: 'rgba(16, 185, 129, 0.2)', border: '1px solid var(--success)' }}></span>
+              <span>Med (≤4.5)</span>
+            </div>
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, backgroundColor: 'rgba(245, 158, 11, 0.2)', border: '1px solid var(--warning)' }}></span>
+              <span>High (≤8)</span>
+            </div>
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, backgroundColor: 'rgba(239, 68, 68, 0.2)', border: '1px solid var(--danger)' }}></span>
+              <span>Full (&gt;8)</span>
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
             </div>
           </div>
         </div>
@@ -222,7 +294,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         <div className="card glass" style={styles.metricCard}>
           <span style={styles.metricLabel}>Active Occupancy</span>
           <div style={styles.metricValue}>{cellOccupancyRate}%</div>
+<<<<<<< HEAD
           <span style={styles.metricSub}>{occupiedCellsCount} / {storageCellsCount} Storage Slots (Excl. Obstacles)</span>
+=======
+          <span style={styles.metricSub}>{occupiedCellsCount} / {totalCellsCount} Cells in use</span>
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
         </div>
 
         <div className="card glass" style={styles.metricCard}>
@@ -268,6 +344,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                   const coordinate = `${row}-${col}`;
                   const cell = cells[coordinate] || { coordinate, category: '', products: [] };
                   const stats = getCellStats(coordinate);
+<<<<<<< HEAD
                   const capStyle = getCapacityStyles(stats.pallets, stats.maxPallets, stats.isObstacle, stats.obstacleType, stats.minThreshold);
 
                   // Render cell if it is configured as an Obstacle
@@ -309,6 +386,10 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                   }
 
                   // Render Normal Storage Cell
+=======
+                  const capStyle = getCapacityStyles(stats.pallets);
+
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
                   return (
                     <div
                       key={coordinate}
@@ -317,9 +398,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                         ...styles.gridCell,
                         backgroundColor: capStyle.bg,
                         borderColor: capStyle.border,
+<<<<<<< HEAD
                         boxShadow: stats.pallets > 0 && !capStyle.isAlert ? `inset 0 0 12px ${capStyle.glow}` : 'none'
                       }}
                       className={`grid-cell-card ${capStyle.isAlert ? 'low-stock-alert' : ''}`}
+=======
+                        boxShadow: stats.pallets > 0 ? `inset 0 0 12px ${capStyle.glow}` : 'none'
+                      }}
+                      className="grid-cell-card"
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
                     >
                       <div style={styles.cellTop}>
                         <span style={styles.cellCoordinate}>{row}{col}</span>
@@ -328,9 +415,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                             {stats.count} SKU{stats.count > 1 ? 's' : ''}
                           </span>
                         )}
+<<<<<<< HEAD
                         {capStyle.isAlert && (
                           <span style={styles.alarmBadge} title="Low stock alert!">🚨</span>
                         )}
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
                       </div>
 
                       <div style={styles.cellBody}>
@@ -341,14 +431,22 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                             </span>
                             <div style={styles.palletInfo}>
                               <span style={styles.palletVal}>{stats.pallets}</span>
+<<<<<<< HEAD
                               <span style={styles.palletUnit}> / {stats.maxPallets} Pallets</span>
+=======
+                              <span style={styles.palletUnit}> Pallets</span>
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
                             </div>
                             {/* Simple visual bar */}
                             <div style={styles.progressBarBg}>
                               <div style={{
                                 ...styles.progressBarFill,
                                 backgroundColor: capStyle.color,
+<<<<<<< HEAD
                                 width: `${Math.min((stats.pallets / stats.maxPallets) * 100, 100)}%`
+=======
+                                width: `${Math.min((stats.pallets / 8) * 100, 100)}%`
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
                               }}></div>
                             </div>
                           </>
@@ -365,7 +463,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         </div>
       </div>
 
+<<<<<<< HEAD
       {/* Embedded CSS for Cell hover and pulse alert animations */}
+=======
+      {/* Embedded CSS for Cell hover effect animations */}
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       <style>{`
         .grid-cell-card {
           cursor: pointer;
@@ -377,6 +479,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
           box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4) !important;
           background-color: rgba(255, 255, 255, 0.05) !important;
         }
+<<<<<<< HEAD
         .obstacle-cell {
           opacity: 0.85;
         }
@@ -395,6 +498,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         .low-stock-legend-dot {
           animation: pulseDangerBorder 2s infinite ease-in-out;
         }
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
       `}</style>
     </div>
   );
@@ -425,6 +530,7 @@ const styles = {
     gap: '0.25rem',
     flex: 1
   },
+<<<<<<< HEAD
   headerTitleRow: {
     display: 'flex',
     alignItems: 'center',
@@ -438,6 +544,8 @@ const styles = {
     gap: '0.35rem',
     marginTop: '0.25rem'
   },
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   gridName: {
     fontSize: '1.75rem',
     fontWeight: '700',
@@ -465,8 +573,12 @@ const styles = {
   legendItems: {
     display: 'flex',
     gap: '1rem',
+<<<<<<< HEAD
     alignItems: 'center',
     flexWrap: 'wrap'
+=======
+    alignItems: 'center'
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   },
   legendItem: {
     display: 'flex',
@@ -579,10 +691,13 @@ const styles = {
     color: 'var(--text-muted)',
     fontWeight: '500'
   },
+<<<<<<< HEAD
   alarmBadge: {
     fontSize: '0.8rem',
     marginLeft: 'auto'
   },
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   cellBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -631,6 +746,7 @@ const styles = {
     fontStyle: 'italic',
     textAlign: 'center',
     margin: 'auto 0'
+<<<<<<< HEAD
   },
   obstacleCellBadge: {
     fontSize: '0.6rem',
@@ -660,5 +776,7 @@ const styles = {
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: '0.05em'
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   }
 };

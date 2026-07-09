@@ -8,6 +8,7 @@ const KEYS = {
 };
 
 export const initializeStorage = () => {
+<<<<<<< HEAD
   const FORCE_RESET_KEY = 'wms_force_reset_v3';
   if (!localStorage.getItem(FORCE_RESET_KEY)) {
     localStorage.removeItem(KEYS.USERS);
@@ -17,6 +18,8 @@ export const initializeStorage = () => {
     localStorage.setItem(FORCE_RESET_KEY, 'true');
   }
 
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   if (!localStorage.getItem(KEYS.USERS)) {
     localStorage.setItem(KEYS.USERS, JSON.stringify(DEFAULT_USERS));
   }
@@ -82,11 +85,16 @@ export const addWarehouse = (warehouse) => {
   return warehouses;
 };
 
+<<<<<<< HEAD
 export const updateCellProducts = (warehouseId, coordinate, cellInfo) => {
+=======
+export const updateCellProducts = (warehouseId, coordinate, category, products) => {
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const warehouses = getWarehouses();
   const updated = warehouses.map(wh => {
     if (wh.id === warehouseId) {
       const cells = { ...wh.cells };
+<<<<<<< HEAD
       if (!cellInfo || (
         (!cellInfo.products || cellInfo.products.length === 0) &&
         !cellInfo.category &&
@@ -95,11 +103,20 @@ export const updateCellProducts = (warehouseId, coordinate, cellInfo) => {
         cellInfo.minThreshold === undefined
       )) {
         // Clear cell if no products and no custom properties
+=======
+      if (products.length === 0 && !category) {
+        // Clear cell if no products
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
         delete cells[coordinate];
       } else {
         cells[coordinate] = {
           coordinate,
+<<<<<<< HEAD
           ...cellInfo
+=======
+          category,
+          products
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
         };
       }
       return { ...wh, cells };

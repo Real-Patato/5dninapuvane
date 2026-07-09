@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   initializeStorage,
+<<<<<<< HEAD
+=======
+  getUsers,
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   getCurrentUser,
   setCurrentUser,
   getWarehouses,
@@ -36,7 +40,10 @@ export default function App() {
   
   // Modals state
   const [isCreateWarehouseOpen, setIsCreateWarehouseOpen] = useState(false);
+<<<<<<< HEAD
   const [warehouseToEdit, setWarehouseToEdit] = useState(null);
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
   const [selectedCellCoord, setSelectedCellCoord] = useState(null);
 
   // Theme states
@@ -115,6 +122,7 @@ export default function App() {
     setIsCreateWarehouseOpen(false);
   };
 
+<<<<<<< HEAD
   const handleUpdateWarehouseLayout = (whData) => {
     if (!warehouseToEdit) return;
     const updated = warehouses.map(wh => {
@@ -145,6 +153,12 @@ export default function App() {
     if (!selectedWarehouse) return;
 
     const updatedWhs = updateCellProducts(selectedWarehouse.id, coordinate, cellInfo);
+=======
+  const handleSaveCellData = (coordinate, category, products) => {
+    if (!selectedWarehouse) return;
+
+    const updatedWhs = updateCellProducts(selectedWarehouse.id, coordinate, category, products);
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
     setWarehouses(updatedWhs);
 
     // Update active selected warehouse state
@@ -200,10 +214,13 @@ export default function App() {
           <WarehouseGrid
             warehouse={selectedWarehouse}
             onCellClick={(coord) => setSelectedCellCoord(coord)}
+<<<<<<< HEAD
             onEditLayoutClick={() => {
               setWarehouseToEdit(selectedWarehouse);
               setIsCreateWarehouseOpen(true);
             }}
+=======
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
           />
         ) : (
           <CustomFieldsConfig
@@ -216,6 +233,7 @@ export default function App() {
       {/* Modals Overlay portals */}
       {isCreateWarehouseOpen && (
         <CreateWarehouseModal
+<<<<<<< HEAD
           onClose={() => {
             setIsCreateWarehouseOpen(false);
             setWarehouseToEdit(null);
@@ -223,6 +241,10 @@ export default function App() {
           onCreate={handleCreateWarehouse}
           onEdit={handleUpdateWarehouseLayout}
           warehouseToEdit={warehouseToEdit}
+=======
+          onClose={() => setIsCreateWarehouseOpen(false)}
+          onCreate={handleCreateWarehouse}
+>>>>>>> b262db34b4a3c03a6a46433cc684b67437667bb0
         />
       )}
 
