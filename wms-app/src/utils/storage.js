@@ -82,6 +82,13 @@ export const addWarehouse = (warehouse) => {
   return warehouses;
 };
 
+export const deleteWarehouse = (warehouseId) => {
+  const warehouses = getWarehouses();
+  const updated = warehouses.filter(wh => wh.id !== warehouseId);
+  saveWarehouses(updated);
+  return updated;
+};
+
 export const updateCellProducts = (warehouseId, coordinate, cellInfo) => {
   const warehouses = getWarehouses();
   const updated = warehouses.map(wh => {

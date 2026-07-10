@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { calculatePallets } from '../utils/mockData';
+
 
 export default function CellModal({
   coordinate,
@@ -8,11 +8,12 @@ export default function CellModal({
   onClose,
   onSaveCellData
 }) {
-  const isCellEmpty = !cellData.products || cellData.products.length === 0;
+  const isCellEmpty = !cellData?.products || cellData.products.length === 0;
 
   // Tabs / Cell Type state
   const [isObstacle, setIsObstacle] = useState(cellData.isObstacle || false);
   const [isPath, setIsPath] = useState(cellData.isPath || false);
+  const [isRefrigerated, setIsRefrigerated] = useState(cellData.isRefrigerated || false);
   const [obstacleType, setObstacleType] = useState(cellData.obstacleType || 'pillar');
 
   // Custom capacity & alerts states
@@ -24,9 +25,11 @@ export default function CellModal({
   const [editingProductId, setEditingProductId] = useState(null);
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [palletCount, setPalletCount] = useState(''); // independent mandatory field
   const [itemsPerPallet, setItemsPerPallet] = useState('');
   const [stock, setStock] = useState('');
   const [expirationDate, setExpirationDate] = useState('');
+  const [temperature, setTemperature] = useState(''); // per-product mandatory field for refrigerated cells
   
   // Custom fields inputs state
   const [customFieldsValues, setCustomFieldsValues] = useState({});
@@ -36,9 +39,11 @@ export default function CellModal({
     setEditingProductId(null);
     setName('');
     setPrice('');
+    setPalletCount('');
     setItemsPerPallet('');
     setStock('');
     setExpirationDate('');
+    setTemperature('');
     
     // Reset custom fields values
     const initialVals = {};
@@ -49,16 +54,20 @@ export default function CellModal({
     setError('');
   }, [customFields]);
 
-  // Sync state if cellData changes
+  // Sync state when the COORDINATE changes (i.e. a different cell is opened).
+  // Using `coordinate` as dependency instead of `cellData` to avoid firing
+  // on every parent re-render (the fallback object in App.jsx creates a new ref each render).
   useEffect(() => {
-    setCategory(cellData.category || '');
-    setIsObstacle(cellData.isObstacle || false);
-    setIsPath(cellData.isPath || false);
-    setObstacleType(cellData.obstacleType || 'pillar');
-    setMaxPallets(cellData.maxPallets !== undefined ? cellData.maxPallets : 8);
-    setMinThreshold(cellData.minThreshold !== undefined ? cellData.minThreshold : '');
+    setCategory(cellData?.category || '');
+    setIsObstacle(cellData?.isObstacle || false);
+    setIsPath(cellData?.isPath || false);
+    setIsRefrigerated(cellData?.isRefrigerated || false);
+    setObstacleType(cellData?.obstacleType || 'pillar');
+    setMaxPallets(cellData?.maxPallets !== undefined ? cellData.maxPallets : 8);
+    setMinThreshold(cellData?.minThreshold !== undefined ? cellData.minThreshold : '');
     resetForm();
-  }, [cellData, resetForm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coordinate, resetForm]);
 
   // Helper function to call save handler with updated state
   const triggerSave = (updatedProducts, updatedCategory, extraProps = {}) => {
@@ -67,8 +76,10 @@ export default function CellModal({
       products: updatedProducts !== undefined ? updatedProducts : cellData.products || [],
       isObstacle: extraProps.isObstacle !== undefined ? extraProps.isObstacle : isObstacle,
       isPath: extraProps.isPath !== undefined ? extraProps.isPath : isPath,
+      isRefrigerated: extraProps.isRefrigerated !== undefined ? extraProps.isRefrigerated : isRefrigerated,
       rowSpan: cellData.rowSpan,
       colSpan: cellData.colSpan,
+      mergedCoords: cellData.mergedCoords,
       obstacleType: extraProps.obstacleType !== undefined ? extraProps.obstacleType : obstacleType,
       maxPallets: extraProps.maxPallets !== undefined ? extraProps.maxPallets : maxPallets,
       minThreshold: extraProps.minThreshold !== undefined ? extraProps.minThreshold : minThreshold
@@ -79,9 +90,11 @@ export default function CellModal({
     setEditingProductId(product.id);
     setName(product.name);
     setPrice(product.price);
-    setItemsPerPallet(product.itemsPerPallet);
-    setStock(product.stock);
-    setExpirationDate(product.expirationDate);
+    setPalletCount(product.palletCount !== undefined ? String(product.palletCount) : '');
+    setItemsPerPallet(product.itemsPerPallet !== undefined ? String(product.itemsPerPallet) : '');
+    setStock(product.stock !== undefined ? String(product.stock) : '');
+    setExpirationDate(product.expirationDate || '');
+    setTemperature(product.temperature !== undefined ? String(product.temperature) : '');
 
     // Populate custom fields values
     const currentVals = {};
@@ -102,28 +115,49 @@ export default function CellModal({
     e.preventDefault();
     setError('');
 
-    // Validations
+    // Mandatory field validations
     if (!name.trim()) {
       setError('Product Name is required.');
       return;
     }
 
     const priceNum = parseFloat(price);
-    if (isNaN(priceNum) || priceNum < 0) {
+    if (!price || isNaN(priceNum) || priceNum < 0) {
       setError('Price per unit must be a positive number.');
       return;
     }
 
-    const itemsPerPalNum = parseInt(itemsPerPallet, 10);
-    if (isNaN(itemsPerPalNum) || itemsPerPalNum <= 0) {
-      setError('Items per Pallet must be greater than zero.');
+    // Number of Pallets — mandatory, integer only, independent value
+    const palletCountNum = parseInt(palletCount, 10);
+    if (palletCount === '' || isNaN(palletCountNum) || palletCountNum < 0) {
+      setError('Number of Pallets is required and must be a non-negative whole number.');
+      return;
+    }
+    if (String(palletCount).includes('.')) {
+      setError('Number of Pallets must be a whole number (no decimals).');
       return;
     }
 
-    const stockNum = parseInt(stock, 10);
-    if (isNaN(stockNum) || stockNum < 0) {
+    // Optional fields — use safe defaults when blank
+    const itemsPerPalNum = itemsPerPallet !== '' ? parseInt(itemsPerPallet, 10) : 0;
+    if (itemsPerPallet !== '' && (isNaN(itemsPerPalNum) || itemsPerPalNum < 0)) {
+      setError('Units per Pallet must be a non-negative number.');
+      return;
+    }
+
+    const stockNum = stock !== '' ? parseInt(stock, 10) : 0;
+    if (stock !== '' && (isNaN(stockNum) || stockNum < 0)) {
       setError('Total Stock must be a non-negative number.');
       return;
+    }
+
+    // Temperature — mandatory for Refrigerator/Freezer cells
+    if (isRefrigerated) {
+      const tempNum = parseFloat(temperature);
+      if (temperature === '' || isNaN(tempNum)) {
+        setError('Storage Temperature is required for Refrigerator/Freezer cells.');
+        return;
+      }
     }
 
     // Determine category to save
@@ -143,9 +177,11 @@ export default function CellModal({
       id: editingProductId || `p-${Date.now()}`,
       name: name.trim(),
       price: priceNum,
+      palletCount: palletCountNum,
       itemsPerPallet: itemsPerPalNum,
       stock: stockNum,
-      expirationDate: expirationDate || new Date().toISOString().split('T')[0],
+      expirationDate: expirationDate || '',
+      ...(isRefrigerated ? { temperature: parseFloat(temperature) } : {}),
       customFields: { ...customFieldsValues }
     };
 
@@ -180,6 +216,7 @@ export default function CellModal({
     triggerSave([], '', {
       isObstacle: true,
       isPath: false,
+      isRefrigerated: false,
       obstacleType: obstacleType
     });
   };
@@ -189,6 +226,7 @@ export default function CellModal({
     triggerSave([], '', {
       isObstacle: false,
       isPath: false,
+      isRefrigerated: false,
       obstacleType: 'pillar'
     });
   };
@@ -198,7 +236,8 @@ export default function CellModal({
     // Save as path: clearing products and category
     triggerSave([], '', {
       isPath: true,
-      isObstacle: false
+      isObstacle: false,
+      isRefrigerated: false
     });
   };
 
@@ -206,7 +245,8 @@ export default function CellModal({
     setIsPath(false);
     triggerSave([], '', {
       isPath: false,
-      isObstacle: false
+      isObstacle: false,
+      isRefrigerated: false
     });
   };
 
@@ -246,13 +286,15 @@ export default function CellModal({
           <div>
             <span className="badge badge-primary" style={styles.cellBadge}>Cell {cleanCoord}</span>
             <h3 style={styles.title}>
-              {cellData.isObstacle 
-                ? `Obstacle Cell: ${obstacleType.toUpperCase()}`
-                : cellData.isPath
-                  ? 'Path / Roadway'
-                  : isCellEmpty 
-                    ? 'Unassigned Storage Cell' 
-                    : `Storage Category: ${cellData.category}`}
+              {cellData.isRefrigerated
+                ? `❄️ Refrigerator/Freezer — ${isCellEmpty ? 'Empty Cold Storage' : cellData.category}`
+                : cellData.isObstacle 
+                  ? `Obstacle Cell: ${obstacleType.toUpperCase()}`
+                  : cellData.isPath
+                    ? 'Path / Roadway'
+                    : isCellEmpty 
+                      ? 'Unassigned Storage Cell' 
+                      : `Storage Category: ${cellData.category}`}
             </h3>
           </div>
           <button className="btn-icon" onClick={onClose}>
@@ -269,9 +311,9 @@ export default function CellModal({
             type="button"
             style={{
               ...styles.tabButton,
-              ...(!isObstacle && !isPath ? styles.activeTabButton : {})
+              ...(!isObstacle && !isPath && !isRefrigerated ? styles.activeTabButton : {})
             }}
-            onClick={() => { setIsObstacle(false); setIsPath(false); }}
+            onClick={() => { setIsObstacle(false); setIsPath(false); setIsRefrigerated(false); }}
           >
             📦 Storage Cell
           </button>
@@ -279,9 +321,19 @@ export default function CellModal({
             type="button"
             style={{
               ...styles.tabButton,
+              ...(isRefrigerated ? { ...styles.activeTabButton, color: '#38bdf8', borderBottomColor: '#38bdf8', background: 'rgba(56,189,248,0.05)' } : {})
+            }}
+            onClick={() => { setIsObstacle(false); setIsPath(false); setIsRefrigerated(true); }}
+          >
+            ❄️ Refrigerator
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.tabButton,
               ...(isPath ? styles.activeTabButton : {})
             }}
-            onClick={() => { setIsObstacle(false); setIsPath(true); }}
+            onClick={() => { setIsObstacle(false); setIsPath(true); setIsRefrigerated(false); }}
           >
             🛣️ Path / Roadway
           </button>
@@ -291,7 +343,7 @@ export default function CellModal({
               ...styles.tabButton,
               ...(isObstacle ? styles.activeTabButton : {})
             }}
-            onClick={() => { setIsObstacle(true); setIsPath(false); }}
+            onClick={() => { setIsObstacle(true); setIsPath(false); setIsRefrigerated(false); }}
           >
             🚧 Obstacle Status
           </button>
@@ -410,8 +462,7 @@ export default function CellModal({
                 </div>
               ) : (
                 <div style={styles.variantsList}>
-                  {cellData.products.map((prod) => {
-                    const pallets = calculatePallets(prod.stock, prod.itemsPerPallet);
+                  {(cellData?.products || []).map((prod) => {
                     return (
                       <div
                         key={prod.id}
@@ -425,7 +476,7 @@ export default function CellModal({
                         <div style={styles.prodHeader}>
                           <div>
                             <h5 style={styles.prodName}>{prod.name}</h5>
-                            <span style={styles.prodPrice}>${prod.price.toFixed(2)} / unit</span>
+                            <span style={styles.prodPrice}>${(prod.price ?? 0).toFixed(2)} / unit</span>
                           </div>
                           <div style={styles.prodActions}>
                             <button
@@ -453,26 +504,32 @@ export default function CellModal({
                           </div>
                         </div>
 
-                        {/* Pallet conversion calculation */}
+                        {/* Product stats display */}
                         <div style={styles.metricsGrid}>
                           <div style={styles.metricItem}>
-                            <span style={styles.metricLabel}>Stock Qty</span>
-                            <span style={styles.metricVal}>{prod.stock} units</span>
-                          </div>
-                          <div style={styles.metricItem}>
-                            <span style={styles.metricLabel}>Pallet Ratio</span>
-                            <span style={styles.metricVal}>{prod.itemsPerPallet} u/Pallet</span>
-                          </div>
-                          <div style={styles.metricItem}>
-                            <span style={styles.metricLabel}>Calculated Load</span>
+                            <span style={styles.metricLabel}>Pallets</span>
                             <span style={{ ...styles.metricVal, color: 'var(--primary)', fontWeight: 'bold' }}>
-                              {pallets.toFixed(2)} Pallets
+                              {prod.palletCount !== undefined ? prod.palletCount : '—'}
                             </span>
                           </div>
                           <div style={styles.metricItem}>
-                            <span style={styles.metricLabel}>Expiration</span>
-                            <span style={styles.metricVal}>{prod.expirationDate}</span>
+                            <span style={styles.metricLabel}>Stock Qty</span>
+                            <span style={styles.metricVal}>{prod.stock || '—'} units</span>
                           </div>
+                          <div style={styles.metricItem}>
+                            <span style={styles.metricLabel}>u/Pallet</span>
+                            <span style={styles.metricVal}>{prod.itemsPerPallet || '—'}</span>
+                          </div>
+                          <div style={styles.metricItem}>
+                            <span style={styles.metricLabel}>Expiration</span>
+                            <span style={styles.metricVal}>{prod.expirationDate || '—'}</span>
+                          </div>
+                          {prod.temperature !== undefined && (
+                            <div style={styles.metricItem}>
+                              <span style={{ ...styles.metricLabel, color: '#38bdf8' }}>❄️ Temp.</span>
+                              <span style={{ ...styles.metricVal, color: '#38bdf8' }}>{prod.temperature}°C</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Custom metadata display */}
@@ -547,7 +604,10 @@ export default function CellModal({
               <form onSubmit={handleFormSubmit} style={styles.form}>
                 {/* Category selector (Only editable on first product) */}
                 <div className="input-group">
-                  <label className="input-label">Cell Category</label>
+                  <label className="input-label">
+                    Cell Category
+                    <span style={styles.requiredAsterisk}> *</span>
+                  </label>
                   <input
                     type="text"
                     className="input-field"
@@ -566,7 +626,10 @@ export default function CellModal({
 
                 {/* Product Name */}
                 <div className="input-group">
-                  <label className="input-label">Product Name / Variant</label>
+                  <label className="input-label">
+                    Product Name / Variant
+                    <span style={styles.requiredAsterisk}> *</span>
+                  </label>
                   <input
                     type="text"
                     className="input-field"
@@ -577,13 +640,17 @@ export default function CellModal({
                   />
                 </div>
 
-                {/* Price & Items per Pallet */}
+                {/* Price & Number of Pallets (mandatory) */}
                 <div style={styles.formRow}>
                   <div className="input-group" style={{ flex: 1 }}>
-                    <label className="input-label">Price per Unit ($)</label>
+                    <label className="input-label">
+                      Price per Unit ($)
+                      <span style={styles.requiredAsterisk}> *</span>
+                    </label>
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       className="input-field"
                       placeholder="0.00"
                       value={price}
@@ -593,48 +660,89 @@ export default function CellModal({
                   </div>
 
                   <div className="input-group" style={{ flex: 1 }}>
-                    <label className="input-label">Units per Pallet</label>
+                    <label className="input-label">
+                      Number of Pallets
+                      <span style={styles.requiredAsterisk}> *</span>
+                    </label>
                     <input
                       type="number"
+                      step="1"
+                      min="0"
+                      className="input-field"
+                      placeholder="e.g. 4"
+                      value={palletCount}
+                      onChange={(e) => setPalletCount(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Units per Pallet & Total Stock (optional) */}
+                <div style={styles.formRow}>
+                  <div className="input-group" style={{ flex: 1 }}>
+                    <label className="input-label">
+                      Units per Pallet
+                      <span style={styles.optionalBadge}> (Optional)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
                       className="input-field"
                       placeholder="e.g. 50"
                       value={itemsPerPallet}
                       onChange={(e) => setItemsPerPallet(e.target.value)}
-                      required
                     />
                   </div>
-                </div>
 
-                {/* Stock and Expiration Date */}
-                <div style={styles.formRow}>
                   <div className="input-group" style={{ flex: 1 }}>
-                    <label className="input-label">Total Stock Quantity</label>
+                    <label className="input-label">
+                      Total Stock Quantity
+                      <span style={styles.optionalBadge}> (Optional)</span>
+                    </label>
                     <input
                       type="number"
+                      min="0"
                       className="input-field"
                       placeholder="e.g. 150"
                       value={stock}
                       onChange={(e) => setStock(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="input-group" style={{ flex: 1 }}>
-                    <label className="input-label">Expiration Date</label>
-                    <input
-                      type="date"
-                      className="input-field"
-                      value={expirationDate}
-                      onChange={(e) => setExpirationDate(e.target.value)}
-                      required
                     />
                   </div>
                 </div>
 
-                {/* Pallet Live Calculator Indicator */}
-                {itemsPerPallet > 0 && stock >= 0 && (
-                  <div style={styles.calculatorOutput} className="badge badge-primary">
-                    Conversion calculation: {stock} units / {itemsPerPallet} per Pallet = <strong>{calculatePallets(stock, itemsPerPallet)} Pallets</strong>
+                {/* Expiration Date — optional, full width */}
+                <div className="input-group">
+                  <label className="input-label">
+                    Expiration Date
+                    <span style={styles.optionalBadge}> (Optional)</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={expirationDate}
+                    onChange={(e) => setExpirationDate(e.target.value)}
+                  />
+                </div>
+
+                {/* Storage Temperature — mandatory for Refrigerator/Freezer cells only */}
+                {isRefrigerated && (
+                  <div className="input-group">
+                    <label className="input-label" style={{ color: '#38bdf8' }}>
+                      ❄️ Storage Temperature (°C)
+                      <span style={styles.requiredAsterisk}> *</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="input-field"
+                      placeholder="e.g. −18 (frozen) or 4 (chilled)"
+                      value={temperature}
+                      onChange={(e) => setTemperature(e.target.value)}
+                      required
+                      style={{ borderColor: 'rgba(56,189,248,0.4)', color: '#38bdf8' }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: 'rgba(56,189,248,0.7)', marginTop: '0.25rem' }}>
+                      Standard: Chilled (+1°C to +8°C) • Frozen (−18°C or below)
+                    </span>
                   </div>
                 )}
 
@@ -900,6 +1008,17 @@ const styles = {
     cursor: 'help',
     color: 'var(--primary)',
     fontWeight: 'bold'
+  },
+  requiredAsterisk: {
+    color: 'var(--danger)',
+    fontWeight: '700',
+    marginLeft: '1px'
+  },
+  optionalBadge: {
+    fontSize: '0.7rem',
+    color: 'var(--text-muted)',
+    fontWeight: '400',
+    fontStyle: 'italic'
   },
   formActions: {
     display: 'flex',

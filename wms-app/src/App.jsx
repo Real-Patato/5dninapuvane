@@ -6,6 +6,7 @@ import {
   getWarehouses,
   saveWarehouses,
   addWarehouse,
+  deleteWarehouse,
   getCustomFields,
   saveCustomFields,
   updateCellProducts
@@ -18,6 +19,7 @@ import WarehouseGrid from './components/WarehouseGrid';
 import CellModal from './components/CellModal';
 import CustomFieldsConfig from './components/CustomFieldsConfig';
 import CreateWarehouseModal from './components/CreateWarehouseModal';
+import DeleteWarehouseModal from './components/DeleteWarehouseModal';
 
 import './App.css';
 
@@ -38,6 +40,7 @@ export default function App() {
   const [isCreateWarehouseOpen, setIsCreateWarehouseOpen] = useState(false);
   const [warehouseToEdit, setWarehouseToEdit] = useState(null);
   const [selectedCellCoord, setSelectedCellCoord] = useState(null);
+  const [isDeleteWarehouseOpen, setIsDeleteWarehouseOpen] = useState(false);
 
   // Theme states
   const [isDarkTheme, setIsDarkTheme] = useState(true);
@@ -166,6 +169,14 @@ export default function App() {
     setCustomFields(updatedFields);
   };
 
+  const handleDeleteWarehouse = () => {
+    if (!selectedWarehouse) return;
+    const updated = deleteWarehouse(selectedWarehouse.id);
+    setWarehouses(updated);
+    setSelectedWarehouse(updated.length > 0 ? updated[0] : null);
+    setIsDeleteWarehouseOpen(false);
+  };
+
   const toggleTheme = () => {
     setIsDarkTheme(prev => !prev);
   };
@@ -193,6 +204,7 @@ export default function App() {
         selectedWarehouse={selectedWarehouse}
         onSelectWarehouse={setSelectedWarehouse}
         onCreateWarehouseClick={() => setIsCreateWarehouseOpen(true)}
+        onDeleteWarehouseClick={() => setIsDeleteWarehouseOpen(true)}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentUser={currentUser}
@@ -241,6 +253,14 @@ export default function App() {
           customFields={customFields}
           onClose={() => setSelectedCellCoord(null)}
           onSaveCellData={handleSaveCellData}
+        />
+      )}
+
+      {isDeleteWarehouseOpen && selectedWarehouse && (
+        <DeleteWarehouseModal
+          warehouse={selectedWarehouse}
+          onClose={() => setIsDeleteWarehouseOpen(false)}
+          onConfirm={handleDeleteWarehouse}
         />
       )}
     </div>

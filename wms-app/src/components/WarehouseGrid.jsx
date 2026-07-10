@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { calculatePallets } from '../utils/mockData';
+
 
 // Dynamic Excel-style row labeling (A, B... Z, AA, AB...)
 const getRowLabel = (index) => {
@@ -28,6 +28,13 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   const [dragStartCoord, setDragStartCoord] = useState(null);
   const [lastClickedCoord, setLastClickedCoord] = useState(null);
 
+  // Dialog / overlay states
+  const [mergeConflict, setMergeConflict] = useState(null);
+  const [mergeContentConflict, setMergeContentConflict] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  // Edit Mode: reveals "+" restore buttons on blank/removed cells
+  const [editMode, setEditMode] = useState(false);
+
   // Global mouseup handler to terminate dragging safely
   useEffect(() => {
     const handleGlobalMouseUp = () => {
@@ -55,6 +62,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
   // Helper to find the primary cell that covers a coordinate (if merged)
   const getCoveringCell = (cellsMap, coord) => {
+    // O(1) fast-path: direct coveredBy pointer (polygon/complex-shape merge)
+    const directCell = cellsMap[coord];
+    if (directCell?.coveredBy) {
+      const primaryCoord = directCell.coveredBy;
+      const primaryCell = cellsMap[primaryCoord];
+      if (primaryCell) return { primaryCoord, cell: primaryCell };
+    }
+
+    // Legacy: bounding-box check for rowSpan/colSpan rectangular merges
     for (const [key, cell] of Object.entries(cellsMap || {})) {
       if (cell.rowSpan > 1 || cell.colSpan > 1) {
         const [rowLabel, colStr] = key.split('-');
@@ -66,7 +82,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         const cc = parseInt(cColStr, 10) - 1;
 
         if (cr >= rStart && cr < rStart + (cell.rowSpan || 1) &&
-            cc >= cStart && cc < cStart + (cell.colSpan || 1)) {
+          cc >= cStart && cc < cStart + (cell.colSpan || 1)) {
           return { primaryCoord: key, cell };
         }
       }
@@ -97,7 +113,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     return Array.from(expanded);
   };
 
-  // Stabilize selection to ensure it's a perfect rectangle
+  // stabilizeSelection: fills the bounding rectangle — used for drag + Shift+click
   const stabilizeSelection = (coords) => {
     let current = new Set(coords);
     let size = 0;
@@ -128,6 +144,10 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     return Array.from(current);
   };
 
+  // normalizeSelection: only expands to include full merged cells, NO bounding-box fill.
+  // Enables non-rectangular (L/T/custom shape) Ctrl+click selections.
+  const normalizeSelection = (coords) => expandSelection(coords);
+
   // Drag selection handlers
   const handleCellMouseDown = (coordinate, e) => {
     if (e.button !== 0) return; // Left click only
@@ -143,7 +163,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       } else {
         nextCoords = [...selectedCoords, targetCoord];
       }
-      setSelectedCoords(stabilizeSelection(nextCoords));
+      // normalizeSelection allows non-rectangular free-form shapes via Ctrl+click
+      setSelectedCoords(normalizeSelection(nextCoords));
       setLastClickedCoord(targetCoord);
     } else if (e.shiftKey && lastClickedCoord) {
       const [startRowLabel, startColStr] = lastClickedCoord.split('-');
@@ -216,9 +237,10 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     setLastClickedCoord(null);
   };
 
-  const handleMergeSelectedCells = () => {
+  const handleMergeSelectedCells = (resolvedCategory = null, resolvedProducts = null) => {
     if (selectedCoords.length <= 1) return;
 
+    // Compute bounding box for CSS grid placement
     let minR = Infinity, maxR = -Infinity;
     let minC = Infinity, maxC = -Infinity;
     selectedCoords.forEach(coord => {
@@ -235,57 +257,104 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     const rowSpan = maxR - minR + 1;
     const colSpan = maxC - minC + 1;
 
-    const mergedProducts = [];
+    // Gather data from all source cells
+    const categoriesFound = new Set();
+    const cellsWithProducts = []; // { coord, products, category }
     let totalMaxPallets = 0;
-    let targetCategory = '';
-
     const updatedCells = { ...cells };
 
     selectedCoords.forEach(coord => {
       const cell = updatedCells[coord];
       if (cell) {
         if (cell.products && cell.products.length > 0) {
-          cell.products.forEach(p => {
-            if (!mergedProducts.some(mp => mp.id === p.id)) {
-              mergedProducts.push(p);
-            }
-          });
+          cellsWithProducts.push({ coord, products: cell.products, category: cell.category });
         }
         totalMaxPallets += cell.maxPallets !== undefined ? cell.maxPallets : 8;
-        if (!targetCategory && cell.category) {
-          targetCategory = cell.category;
-        }
-        if (coord !== primaryCoord) {
-          delete updatedCells[coord];
-        }
+        if (cell.category) categoriesFound.add(cell.category);
       } else {
         totalMaxPallets += 8;
       }
     });
 
-    updatedCells[primaryCoord] = {
-      coordinate: primaryCoord,
-      category: targetCategory || '',
-      products: mergedProducts,
-      maxPallets: totalMaxPallets,
-      rowSpan,
-      colSpan
-    };
+    // Step 1: Category conflict — show dialog if categories differ
+    if (categoriesFound.size > 1 && resolvedCategory === null) {
+      setMergeConflict({
+        categories: Array.from(categoriesFound),
+        onResolve: (chosenCategory) => {
+          setMergeConflict(null);
+          handleMergeSelectedCells(chosenCategory, resolvedProducts);
+        },
+        onCancel: () => setMergeConflict(null)
+      });
+      return;
+    }
 
-    onUpdateWarehouse({
-      ...warehouse,
-      cells: updatedCells
+    // Step 2: Content conflict — show dialog when multiple cells have products
+    if (cellsWithProducts.length > 1 && resolvedProducts === null) {
+      setMergeContentConflict({
+        sourceCells: cellsWithProducts,
+        onKeep: (chosenCoord) => {
+          const src = cellsWithProducts.find(s => s.coord === chosenCoord);
+          setMergeContentConflict(null);
+          handleMergeSelectedCells(resolvedCategory, src?.products || []);
+        },
+        onCombine: () => {
+          const combined = [];
+          cellsWithProducts.forEach(src => {
+            src.products.forEach(p => {
+              if (!combined.some(mp => mp.id === p.id)) combined.push(p);
+            });
+          });
+          setMergeContentConflict(null);
+          handleMergeSelectedCells(resolvedCategory, combined);
+        },
+        onCancel: () => setMergeContentConflict(null)
+      });
+      return;
+    }
+
+    // Determine final category
+    let targetCategory = resolvedCategory;
+    if (targetCategory === null) {
+      targetCategory = categoriesFound.size === 1 ? Array.from(categoriesFound)[0] : '';
+    }
+
+    // Determine final products
+    let finalProducts = resolvedProducts;
+    if (finalProducts === null) {
+      finalProducts = cellsWithProducts.length === 1 ? cellsWithProducts[0].products : [];
+    }
+
+    // Apply merge: each non-primary coord gets a coveredBy pointer
+    selectedCoords.forEach(coord => {
+      if (coord !== primaryCoord) {
+        updatedCells[coord] = { coordinate: coord, coveredBy: primaryCoord };
+      }
     });
 
+    // Primary cell stores the full mergedCoords list + bounding-box spans
+    updatedCells[primaryCoord] = {
+      coordinate: primaryCoord,
+      category: targetCategory,
+      products: finalProducts,
+      maxPallets: totalMaxPallets,
+      rowSpan,
+      colSpan,
+      mergedCoords: [...selectedCoords]
+    };
+
+    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
     setSelectedCoords([]);
   };
 
-  const handleSplitSelectedCell = () => {
+  // Unmerge: restore merged cell back into individual cells
+  const handleUnmergeSelectedCell = () => {
     if (selectedCoords.length === 0) return;
 
     let primaryCoord = null;
     for (const coord of selectedCoords) {
-      if (cells[coord] && (cells[coord].rowSpan > 1 || cells[coord].colSpan > 1)) {
+      const c = cells[coord];
+      if (c && (c.rowSpan > 1 || c.colSpan > 1 || c.mergedCoords?.length > 0)) {
         primaryCoord = coord;
         break;
       }
@@ -296,17 +365,84 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     const updatedCells = { ...cells };
     const cell = updatedCells[primaryCoord];
 
-    delete cell.rowSpan;
-    delete cell.colSpan;
-    cell.maxPallets = 8; // reset to standard single cell capacity
-
-    onUpdateWarehouse({
-      ...warehouse,
-      cells: updatedCells
+    // Restore every coord that was part of this merge
+    const mergedCoords = cell.mergedCoords || [primaryCoord];
+    mergedCoords.forEach(coord => {
+      if (coord === primaryCoord) {
+        // Keep the primary's products/category, strip span/merge metadata
+        const restored = {
+          coordinate: primaryCoord,
+          category: cell.category || '',
+          products: cell.products || [],
+          maxPallets: 8,
+          isObstacle: cell.isObstacle || false,
+          isPath: cell.isPath || false
+        };
+        if (cell.isRefrigerated) restored.isRefrigerated = true;
+        updatedCells[primaryCoord] = restored;
+      } else {
+        // Restore sub-cells as clean empty cells
+        updatedCells[coord] = {
+          coordinate: coord,
+          category: '',
+          products: [],
+          maxPallets: 8
+        };
+      }
     });
 
+    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
     setSelectedCoords([]);
   };
+
+  // Remove cells: mark selected cells as removed (leaves blank space in grid)
+  const handleRemoveSelectedCells = () => {
+    if (selectedCoords.length === 0) return;
+    const coordsToRemove = [...selectedCoords];
+
+    // Safety guardrail: check if any selected cell has active inventory
+    const occupiedCells = coordsToRemove
+      .filter(coord => {
+        const cell = cells[coord];
+        return cell && !cell.isRemoved && cell.products && cell.products.length > 0;
+      })
+      .map(coord => ({ coord, count: cells[coord].products.length }));
+
+    if (occupiedCells.length > 0) {
+      // Store data in state so the confirm dialog can perform the removal with
+      // fresh cells/warehouse references at click time
+      setDeleteConfirm({ coordsToRemove, occupiedCells });
+      return;
+    }
+
+    const updatedCells = { ...cells };
+    coordsToRemove.forEach(coord => {
+      updatedCells[coord] = { coordinate: coord, isRemoved: true };
+    });
+    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
+    setSelectedCoords([]);
+  };
+
+  // Restore removed cells via toolbar (multi-select)
+  const handleRestoreSelectedCells = () => {
+    if (selectedCoords.length === 0) return;
+    const updatedCells = { ...cells };
+    selectedCoords.forEach(coord => {
+      if (updatedCells[coord]?.isRemoved) {
+        delete updatedCells[coord];
+      }
+    });
+    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
+    setSelectedCoords([]);
+  };
+
+  // Single-click restore from Edit Mode "+" button (no selection needed)
+  const handleRestoreCell = (coord) => {
+    const updatedCells = { ...cells };
+    delete updatedCells[coord];
+    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
+  };
+
 
   // Helper to get total pallets and properties in cell
   const getCellStats = (coordinate) => {
@@ -315,6 +451,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     const maxPal = (cell && cell.maxPallets !== undefined) ? cell.maxPallets : defaultMaxPallets;
     const isObstacle = cell ? !!cell.isObstacle : false;
     const isPath = cell ? !!cell.isPath : false;
+    const isRefrigerated = cell ? !!cell.isRefrigerated : false;
     const obstacleType = cell ? cell.obstacleType : null;
     const minThreshold = (cell && cell.minThreshold !== undefined) ? cell.minThreshold : null;
 
@@ -326,33 +463,37 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         maxPallets: 0,
         isObstacle: false,
         isPath: true,
+        isRefrigerated: false,
         obstacleType: null,
         minThreshold: null
       };
     }
 
     if (!cell || !cell.products || cell.products.length === 0) {
-      return { 
-        category: isObstacle ? 'Obstacle' : 'Empty', 
-        pallets: 0, 
-        count: 0, 
-        maxPallets: maxPal, 
-        isObstacle, 
+      return {
+        category: isObstacle ? 'Obstacle' : 'Empty',
+        pallets: 0,
+        count: 0,
+        maxPallets: maxPal,
+        isObstacle,
         isPath: false,
-        obstacleType, 
-        minThreshold 
+        isRefrigerated,
+        obstacleType,
+        minThreshold
       };
     }
+    // Sum the user-entered palletCount per product variant (independent field, not derived)
     const pallets = cell.products.reduce((acc, prod) => {
-      return acc + calculatePallets(prod.stock, prod.itemsPerPallet);
+      return acc + (prod.palletCount !== undefined ? Number(prod.palletCount) : 0);
     }, 0);
     return {
       category: cell.category || 'Unassigned',
-      pallets: pallets,
+      pallets,
       count: cell.products.length,
       maxPallets: maxPal,
       isObstacle,
       isPath: false,
+      isRefrigerated,
       obstacleType,
       minThreshold
     };
@@ -367,7 +508,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   rowLabels.forEach((row) => {
     colLabels.forEach((col) => {
       const coord = `${row}-${col}`;
-      
+
       const covering = getCoveringCell(cells, coord);
       if (covering && covering.primaryCoord !== coord) {
         return; // Skip metrics calculation for sub-cells
@@ -387,7 +528,9 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   });
 
   const totalCellsCount = rows * columns;
-  const storageCellsCount = totalCellsCount - obstacleCellsCount;
+  // Count removed cells
+  const removedCellsCount = Object.values(cells).filter(c => c.isRemoved).length;
+  const storageCellsCount = totalCellsCount - obstacleCellsCount - removedCellsCount;
   const cellOccupancyRate = Math.round((occupiedCellsCount / (storageCellsCount || 1)) * 100) || 0;
 
   // Helper to determine status color and intensity based on pallet load
@@ -492,9 +635,22 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
               </svg>
               Edit Layout
             </button>
+            <button
+              onClick={() => setEditMode(prev => !prev)}
+              className="btn btn-secondary"
+              style={{
+                ...styles.editLayoutBtn,
+                color: editMode ? 'var(--success)' : 'var(--text-secondary)',
+                borderColor: editMode ? 'rgba(16,185,129,0.5)' : undefined,
+                backgroundColor: editMode ? 'rgba(16,185,129,0.08)' : undefined
+              }}
+              title="Toggle Edit Mode: shows + buttons on removed cells for quick restore"
+            >
+              {editMode ? '✅' : '🔧'} Edit Mode{editMode ? ' (ON)' : ''}
+            </button>
           </div>
           <p style={styles.gridSubtext}>
-            Interactive floor plan mapping. Click any storage cell coordinate below to edit its products. Drag select or use Shift/Ctrl + Click to select multiple cells for merging.
+            Click a cell to view/edit inventory. <strong>Ctrl+Click</strong> multiple cells to build custom shapes (L/T). <strong>Drag</strong> or <strong>Shift+Click</strong> for rectangle selections. Toggle <strong>Edit Mode</strong> to reveal empty-slot restore buttons.
           </p>
         </div>
 
@@ -523,16 +679,20 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
               <span>Full (&gt;100%)</span>
             </div>
             <div style={styles.legendItem}>
-              <span style={{ 
-                ...styles.legendDot, 
+              <span style={{
+                ...styles.legendDot,
                 backgroundImage: 'repeating-linear-gradient(45deg, rgba(31, 41, 55, 0.45), rgba(31, 41, 55, 0.45) 3px, rgba(75, 85, 99, 0.25) 3px, rgba(75, 85, 99, 0.25) 6px)',
-                border: '1px dashed rgba(156, 163, 175, 0.5)' 
+                border: '1px dashed rgba(156, 163, 175, 0.5)'
               }}></span>
               <span>Obstacle</span>
             </div>
             <div style={styles.legendItem}>
               <span style={{ ...styles.legendDot, backgroundColor: '#18181b', border: '1.5px dashed #eab308' }}></span>
               <span>Roadway</span>
+            </div>
+            <div style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, background: 'linear-gradient(135deg, #0c2a4a 0%, #0e3d6e 100%)', border: '1.5px solid #38bdf8' }}></span>
+              <span style={{ color: '#38bdf8', fontWeight: '600' }}>❄️ Cold Storage</span>
             </div>
             <div style={styles.legendItem}>
               <span className="low-stock-legend-dot" style={{ ...styles.legendDot, backgroundColor: 'rgba(239, 68, 68, 0.35)', border: '1.5px solid var(--danger)' }}></span>
@@ -554,7 +714,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
             </button>
           </div>
           <div style={styles.toolbarRight}>
-            {selectedCoords.length === 1 && (
+            {/* Edit single cell */}
+            {selectedCoords.length === 1 && !cells[selectedCoords[0]]?.isRemoved && (
               <button
                 className="btn btn-secondary"
                 style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
@@ -566,24 +727,188 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                 ✏️ Edit Cell
               </button>
             )}
-            {selectedCoords.length > 1 && (
+
+            {/* Merge (multi-select, no removed cells) */}
+            {selectedCoords.length > 1 && !selectedCoords.some(c => cells[c]?.isRemoved) && (
               <button
                 className="btn btn-primary"
                 style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
-                onClick={handleMergeSelectedCells}
+                onClick={() => handleMergeSelectedCells()}
               >
                 🔗 Merge Cells
               </button>
             )}
-            {selectedCoords.length === 1 && cells[selectedCoords[0]] && (cells[selectedCoords[0]].rowSpan > 1 || cells[selectedCoords[0]].colSpan > 1) && (
+
+            {/* Unmerge merged cell — detects both old rowSpan and new mergedCoords */}
+            {selectedCoords.length === 1 && cells[selectedCoords[0]] &&
+              (cells[selectedCoords[0]].rowSpan > 1 || cells[selectedCoords[0]].colSpan > 1 || cells[selectedCoords[0]].mergedCoords?.length > 0) && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                  onClick={handleUnmergeSelectedCell}
+                >
+                  🔓 Unmerge
+                </button>
+              )}
+
+            {/* Remove Cells (only non-removed cells selected) */}
+            {!selectedCoords.every(c => cells[c]?.isRemoved) && (
               <button
                 className="btn btn-secondary"
-                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
-                onClick={handleSplitSelectedCell}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  color: 'var(--warning)',
+                  borderColor: 'rgba(245,158,11,0.3)'
+                }}
+                onClick={handleRemoveSelectedCells}
+                title="Remove selected cells from the floor plan (leaves blank space)"
               >
-                🔓 Split Cells
+                ✂️ Remove Cell{selectedCoords.length > 1 ? 's' : ''}
               </button>
             )}
+
+            {/* Restore removed cells */}
+            {selectedCoords.some(c => cells[c]?.isRemoved) && (
+              <button
+                className="btn btn-secondary"
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  color: 'var(--success)',
+                  borderColor: 'rgba(16,185,129,0.3)'
+                }}
+                onClick={handleRestoreSelectedCells}
+              >
+                ♻️ Restore Cell{selectedCoords.length > 1 ? 's' : ''}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Merge Conflict Dialog */}
+      {mergeConflict && (
+        <div style={styles.conflictOverlay} className="animate-fade-in">
+          <div style={styles.conflictDialog} className="card glass">
+            <div style={styles.conflictHeader}>
+              <span style={styles.conflictIcon}>⚠️</span>
+              <div>
+                <h4 style={styles.conflictTitle}>Category Conflict Detected</h4>
+                <p style={styles.conflictDesc}>The selected cells have different categories. Choose which category the merged cell should use:</p>
+              </div>
+            </div>
+            <div style={styles.conflictCategories}>
+              {mergeConflict.categories.map(cat => (
+                <button
+                  key={cat}
+                  className="btn btn-secondary"
+                  style={styles.conflictCatBtn}
+                  onClick={() => mergeConflict.onResolve(cat)}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+            <div style={styles.conflictActions}>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                onClick={mergeConflict.onCancel}
+              >
+                Cancel Merge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Occupied Cell — Safety Confirmation */}
+      {deleteConfirm && (
+        <div style={styles.conflictOverlay} className="animate-fade-in">
+          <div style={{ ...styles.conflictDialog, border: '1px solid rgba(239,68,68,0.4)', boxShadow: '0 0 40px rgba(239,68,68,0.12)' }} className="card glass">
+            <div style={styles.conflictHeader}>
+              <span style={styles.conflictIcon}>⛔</span>
+              <div>
+                <h4 style={styles.conflictTitle}>Occupied Cell — Delete Warning</h4>
+                <p style={styles.conflictDesc}>
+                  The following {deleteConfirm.occupiedCells.length > 1 ? 'cells contain' : 'cell contains'} active inventory.
+                  Removing {deleteConfirm.occupiedCells.length > 1 ? 'them' : 'it'} will <strong>permanently discard all stored product data</strong>.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {deleteConfirm.occupiedCells.map(({ coord, count }) => (
+                <div key={coord} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0.75rem', backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.18)' }}>
+                  <span style={{ fontFamily: 'monospace', fontWeight: '700', color: 'var(--danger)', fontSize: '0.9rem' }}>{coord.replace('-', '')}</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{count} product variant{count > 1 ? 's' : ''} will be lost</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ ...styles.conflictActions, justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button className="btn btn-secondary" style={{ fontSize: '0.8rem' }} onClick={() => setDeleteConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn"
+                style={{ fontSize: '0.8rem', backgroundColor: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', padding: '0.4rem 1rem', borderRadius: '8px' }}
+                onClick={() => {
+                  const updatedCells = { ...cells };
+                  deleteConfirm.coordsToRemove.forEach(coord => {
+                    updatedCells[coord] = { coordinate: coord, isRemoved: true };
+                  });
+                  onUpdateWarehouse({ ...warehouse, cells: updatedCells });
+                  setSelectedCoords([]);
+                  setDeleteConfirm(null);
+                }}
+              >
+                🗑️ Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Content Conflict — choose which cell's products to keep */}
+      {mergeContentConflict && (
+        <div style={styles.conflictOverlay} className="animate-fade-in">
+          <div style={{ ...styles.conflictDialog, maxWidth: '560px' }} className="card glass">
+            <div style={styles.conflictHeader}>
+              <span style={styles.conflictIcon}>📦</span>
+              <div>
+                <h4 style={styles.conflictTitle}>Content Conflict: Multiple Cells Have Products</h4>
+                <p style={styles.conflictDesc}>Choose which cell's inventory to keep in the merged cell, or combine all products.</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {mergeContentConflict.sourceCells.map(({ coord, products }) => (
+                <button
+                  key={coord}
+                  className="btn btn-secondary"
+                  style={{ textAlign: 'left', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-start', borderColor: 'rgba(59,130,246,0.25)' }}
+                  onClick={() => mergeContentConflict.onKeep(coord)}
+                >
+                  <span style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '0.9rem', color: 'var(--primary)' }}>
+                    Keep Cell {coord.replace('-', '')} &nbsp;·&nbsp; {products.length} variant{products.length > 1 ? 's' : ''}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {products.slice(0, 3).map(p => p.name).join(', ')}{products.length > 3 ? ` +${products.length - 3} more` : ''}
+                  </span>
+                </button>
+              ))}
+              <button
+                className="btn btn-primary"
+                style={{ padding: '0.6rem 1rem', marginTop: '0.25rem' }}
+                onClick={mergeContentConflict.onCombine}
+              >
+                🔗 Combine All Products
+              </button>
+            </div>
+            <div style={styles.conflictActions}>
+              <button className="btn btn-secondary" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }} onClick={mergeContentConflict.onCancel}>
+                Cancel Merge
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -651,7 +976,65 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                 {colLabels.map((col, c) => {
                   const coordinate = `${row}-${col}`;
                   const cell = cells[coordinate] || { coordinate, category: '', products: [] };
-                  
+
+                  // Render removed cells — invisible placeholders normally, visible with "+" in Edit Mode
+                  if (cell.isRemoved) {
+                    const isSelected = selectedCoords.includes(coordinate);
+                    const showSlot = isSelected || editMode;
+                    return (
+                      <div
+                        key={coordinate}
+                        onMouseDown={(e) => handleCellMouseDown(coordinate, e)}
+                        onMouseEnter={() => handleCellMouseEnter(coordinate)}
+                        onClick={() => {
+                          if (editMode && !isSelected) {
+                            handleRestoreCell(coordinate); // Edit Mode: single-click restore
+                          } else {
+                            handleCellClick(coordinate);
+                          }
+                        }}
+                        style={{
+                          ...styles.gridCell,
+                          gridRowStart: r + 2,
+                          gridRowEnd: r + 2 + 1,
+                          gridColumnStart: c + 2,
+                          gridColumnEnd: c + 2 + 1,
+                          visibility: showSlot ? 'visible' : 'hidden',
+                          border: isSelected
+                            ? '2px dashed var(--warning)'
+                            : editMode
+                              ? '2px dashed rgba(16,185,129,0.35)'
+                              : '2px dashed transparent',
+                          backgroundColor: isSelected
+                            ? 'rgba(245,158,11,0.05)'
+                            : editMode
+                              ? 'rgba(16,185,129,0.03)'
+                              : 'transparent',
+                          boxShadow: 'none',
+                          cursor: 'pointer'
+                        }}
+                        className="removed-cell-slot"
+                      >
+                        {showSlot && (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '0.25rem' }}>
+                            {isSelected ? (
+                              <>
+                                <span style={{ fontSize: '1.2rem' }}>↩️</span>
+                                <span style={{ fontSize: '0.65rem', color: 'var(--warning)', fontWeight: '600', textAlign: 'center' }}>REMOVED<br />Click Restore</span>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ fontSize: '1.6rem', color: 'var(--success)', lineHeight: 1, fontWeight: '300' }}>+</span>
+                                <span style={{ fontSize: '0.6rem', color: 'var(--success)', fontWeight: '700', fontFamily: 'monospace', textAlign: 'center' }}>{coordinate.replace('-', '')}</span>
+                                <span style={{ fontSize: '0.55rem', color: 'rgba(16,185,129,0.6)', textAlign: 'center' }}>restore slot</span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
                   const covering = getCoveringCell(cells, coordinate);
                   if (covering && covering.primaryCoord !== coordinate) {
                     return null; // Skip rendering covered coordinates
@@ -666,18 +1049,18 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
                   // Render cell if it is configured as an Obstacle
                   if (stats.isObstacle) {
-                    const obstacleIcon = 
+                    const obstacleIcon =
                       stats.obstacleType === 'pillar' ? '🏛️' :
-                      stats.obstacleType === 'wall' ? '🧱' :
-                      stats.obstacleType === 'fire_extinguisher' ? '🧯' :
-                      stats.obstacleType === 'emergency_exit' ? '🚨' :
-                      stats.obstacleType === 'walkway' ? '🚶' : '🚧';
-                    const obstacleName = 
+                        stats.obstacleType === 'wall' ? '🧱' :
+                          stats.obstacleType === 'fire_extinguisher' ? '🧯' :
+                            stats.obstacleType === 'emergency_exit' ? '🚨' :
+                              stats.obstacleType === 'walkway' ? '🚶' : '🚧';
+                    const obstacleName =
                       stats.obstacleType === 'pillar' ? 'Pillar' :
-                      stats.obstacleType === 'wall' ? 'Wall' :
-                      stats.obstacleType === 'fire_extinguisher' ? 'Fire Ext.' :
-                      stats.obstacleType === 'emergency_exit' ? 'Exit' :
-                      stats.obstacleType === 'walkway' ? 'Walkway' : 'Obstacle';
+                        stats.obstacleType === 'wall' ? 'Wall' :
+                          stats.obstacleType === 'fire_extinguisher' ? 'Fire Ext.' :
+                            stats.obstacleType === 'emergency_exit' ? 'Exit' :
+                              stats.obstacleType === 'walkway' ? 'Walkway' : 'Obstacle';
 
                     return (
                       <div
@@ -743,6 +1126,62 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                     );
                   }
 
+                  // Render Refrigerator / Freezer Cell
+                  if (stats.isRefrigerated) {
+                    return (
+                      <div
+                        key={coordinate}
+                        onMouseDown={(e) => handleCellMouseDown(coordinate, e)}
+                        onMouseEnter={() => handleCellMouseEnter(coordinate)}
+                        onDoubleClick={() => onCellClick(coordinate, cell)}
+                        onClick={() => handleCellClick(coordinate)}
+                        style={{
+                          ...styles.gridCell,
+                          background: isSelected
+                            ? 'rgba(56,189,248,0.12)'
+                            : stats.pallets > 0
+                              ? 'linear-gradient(145deg, rgba(12,42,74,0.85) 0%, rgba(14,61,110,0.75) 100%)'
+                              : 'linear-gradient(145deg, rgba(8,28,52,0.9) 0%, rgba(10,45,85,0.8) 100%)',
+                          borderColor: isSelected ? 'var(--primary)' : '#38bdf8',
+                          boxShadow: isSelected
+                            ? '0 0 0 3px var(--primary)'
+                            : '0 0 16px rgba(56,189,248,0.12), inset 0 1px 0 rgba(56,189,248,0.1)',
+                          gridRowStart: r + 2,
+                          gridRowEnd: r + 2 + cellRowSpan,
+                          gridColumnStart: c + 2,
+                          gridColumnEnd: c + 2 + cellColSpan
+                        }}
+                        className={`grid-cell-card refrigerated-cell ${isSelected ? 'selected' : ''}`}
+                      >
+                        <div style={styles.cellTop}>
+                          <span style={{ ...styles.cellCoordinate, color: '#7dd3fc' }}>{row}{col}</span>
+                          <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                            {stats.pallets > 0 && (
+                              <span style={styles.variantCountBadge}>{stats.count} SKU{stats.count > 1 ? 's' : ''}</span>
+                            )}
+                            <span style={styles.refrigCellBadge}>❄️ COLD</span>
+                          </div>
+                        </div>
+                        <div style={styles.cellBody}>
+                          {stats.pallets > 0 ? (
+                            <>
+                              <span style={{ ...styles.cellCategory, color: '#38bdf8' }}>{stats.category}</span>
+                              <div style={styles.palletInfo}>
+                                <span style={styles.palletVal}>{stats.pallets}</span>
+                                <span style={styles.palletUnit}> / {stats.maxPallets} Pallets</span>
+                              </div>
+                              <div style={styles.progressBarBg}>
+                                <div style={{ ...styles.progressBarFill, backgroundColor: '#38bdf8', width: `${Math.min((stats.pallets / stats.maxPallets) * 100, 100)}%` }}></div>
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ ...styles.emptyCellText, color: '#38bdf8' }}>❄️ Cold Storage Ready</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   // Render Normal Storage Cell
                   return (
                     <div
@@ -755,8 +1194,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                         ...styles.gridCell,
                         backgroundColor: capStyle.bg,
                         borderColor: isSelected ? 'var(--primary)' : capStyle.border,
-                        boxShadow: isSelected 
-                          ? '0 0 0 3px var(--primary)' 
+                        boxShadow: isSelected
+                          ? '0 0 0 3px var(--primary)'
                           : (stats.pallets > 0 && !capStyle.isAlert ? `inset 0 0 12px ${capStyle.glow}` : 'none'),
                         gridRowStart: r + 2,
                         gridRowEnd: r + 2 + cellRowSpan,
@@ -863,6 +1302,22 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         .low-stock-legend-dot {
           animation: pulseDangerBorder 2s infinite ease-in-out;
         }
+        @keyframes iceGlow {
+          0%   { box-shadow: 0 0 8px rgba(56,189,248,0.1), inset 0 1px 0 rgba(56,189,248,0.08); }
+          50%  { box-shadow: 0 0 18px rgba(56,189,248,0.22), inset 0 1px 0 rgba(56,189,248,0.15); }
+          100% { box-shadow: 0 0 8px rgba(56,189,248,0.1), inset 0 1px 0 rgba(56,189,248,0.08); }
+        }
+        .refrigerated-cell {
+          animation: iceGlow 3s ease-in-out infinite;
+        }
+        .refrigerated-cell:hover {
+          border-color: #7dd3fc !important;
+          background: linear-gradient(145deg, rgba(14,55,100,0.95) 0%, rgba(16,72,130,0.85) 100%) !important;
+        }
+        .removed-cell-slot:hover {
+          visibility: visible !important;
+          opacity: 0.8;
+        }
       `}</style>
     </div>
   );
@@ -905,6 +1360,16 @@ const styles = {
     alignItems: 'center',
     gap: '0.35rem',
     marginTop: '0.25rem'
+  },
+  refrigCellBadge: {
+    fontSize: '0.6rem',
+    backgroundColor: 'rgba(56,189,248,0.12)',
+    padding: '0.15rem 0.35rem',
+    borderRadius: '4px',
+    color: '#38bdf8',
+    fontWeight: '700',
+    letterSpacing: '0.02em',
+    border: '1px solid rgba(56,189,248,0.25)'
   },
   gridName: {
     fontSize: '1.75rem',
@@ -973,7 +1438,69 @@ const styles = {
   toolbarRight: {
     display: 'flex',
     alignItems: 'center',
+    gap: '0.75rem',
+    flexWrap: 'wrap'
+  },
+  conflictOverlay: {
+    position: 'fixed',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(5, 7, 12, 0.75)',
+    backdropFilter: 'blur(6px)',
+    zIndex: 900,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1.5rem'
+  },
+  conflictDialog: {
+    maxWidth: '480px',
+    width: '100%',
+    padding: '1.75rem',
+    borderRadius: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1.25rem',
+    border: '1px solid rgba(245, 158, 11, 0.3)',
+    boxShadow: '0 0 40px rgba(245, 158, 11, 0.1)'
+  },
+  conflictHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '1rem'
+  },
+  conflictIcon: {
+    fontSize: '2rem',
+    lineHeight: 1,
+    flexShrink: 0
+  },
+  conflictTitle: {
+    fontSize: '1.1rem',
+    fontWeight: '700',
+    color: 'var(--text-primary)',
+    marginBottom: '0.35rem'
+  },
+  conflictDesc: {
+    fontSize: '0.85rem',
+    color: 'var(--text-secondary)',
+    lineHeight: '1.5'
+  },
+  conflictCategories: {
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: '0.75rem'
+  },
+  conflictCatBtn: {
+    padding: '0.5rem 1.25rem',
+    fontSize: '0.9rem',
+    fontWeight: '600',
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+    color: 'var(--warning)'
+  },
+  conflictActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    borderTop: '1px solid var(--border-color)',
+    paddingTop: '0.75rem'
   },
   metricsRow: {
     display: 'grid',
