@@ -35,6 +35,13 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   // Edit Mode: reveals "+" restore buttons on blank/removed cells
   const [editMode, setEditMode] = useState(false);
 
+  // Feature: Adjacency validation toast
+  const [adjacencyError, setAdjacencyError] = useState(null);
+  // Feature: Cell type conflict resolution (Freezer / Normal / Obstacle)
+  const [typeConflict, setTypeConflict] = useState(null);
+  // Feature: Unmerge inventory distribution modal
+  const [unmergeDistribution, setUnmergeDistribution] = useState(null);
+
   // Global mouseup handler to terminate dragging safely
   useEffect(() => {
     const handleGlobalMouseUp = () => {
@@ -62,7 +69,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
   // Helper to find the primary cell that covers a coordinate (if merged)
   const getCoveringCell = (cellsMap, coord) => {
-    // O(1) fast-path: direct coveredBy pointer (polygon/complex-shape merge)
+    // O(1) fast-path: direct coveredBy pointer (works for all shapes — rect and irregular)
     const directCell = cellsMap[coord];
     if (directCell?.coveredBy) {
       const primaryCoord = directCell.coveredBy;
@@ -70,17 +77,19 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       if (primaryCell) return { primaryCoord, cell: primaryCell };
     }
 
-    // Legacy: bounding-box check for rowSpan/colSpan rectangular merges
+    // Legacy bounding-box fallback — ONLY for old rectangular merged cells that
+    // pre-date the explicit mergedCoords/coveredBy system (i.e. no mergedCoords stored).
+    // Cells with mergedCoords use the coveredBy pointer path above, so this path
+    // will NEVER incorrectly claim coverage of out-of-shape coords (e.g. the
+    // "missing corner" of an L-shape).
     for (const [key, cell] of Object.entries(cellsMap || {})) {
-      if (cell.rowSpan > 1 || cell.colSpan > 1) {
+      if ((cell.rowSpan > 1 || cell.colSpan > 1) && !cell.mergedCoords && key !== coord) {
         const [rowLabel, colStr] = key.split('-');
         const rStart = getRowIndex(rowLabel);
         const cStart = parseInt(colStr, 10) - 1;
-
         const [cRowLabel, cColStr] = coord.split('-');
         const cr = getRowIndex(cRowLabel);
         const cc = parseInt(cColStr, 10) - 1;
-
         if (cr >= rStart && cr < rStart + (cell.rowSpan || 1) &&
           cc >= cStart && cc < cStart + (cell.colSpan || 1)) {
           return { primaryCoord: key, cell };
@@ -90,20 +99,28 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     return null;
   };
 
-  // Expand selection to include full merged cells
+  // Expand selection to include all coords of any merged cell touched by the selection.
+  // Uses mergedCoords (precise) when available; falls back to bounding-box for legacy data.
   const expandSelection = (coords) => {
     const expanded = new Set();
     coords.forEach(coord => {
       const covering = getCoveringCell(cells, coord);
       if (covering) {
-        const [rowLabel, colStr] = covering.primaryCoord.split('-');
-        const rStart = getRowIndex(rowLabel);
-        const cStart = parseInt(colStr, 10) - 1;
-        const rowSpan = covering.cell.rowSpan || 1;
-        const colSpan = covering.cell.colSpan || 1;
-        for (let dr = 0; dr < rowSpan; dr++) {
-          for (let dc = 0; dc < colSpan; dc++) {
-            expanded.add(getCoordinate(rStart + dr, cStart + dc));
+        const mc = covering.cell.mergedCoords;
+        if (mc && mc.length > 0) {
+          // Precise expansion: include exactly the cells in the merged shape
+          mc.forEach(c => expanded.add(c));
+        } else {
+          // Legacy bounding-box expansion for old-format data
+          const [rowLabel, colStr] = covering.primaryCoord.split('-');
+          const rStart = getRowIndex(rowLabel);
+          const cStart = parseInt(colStr, 10) - 1;
+          const rowSpan = covering.cell.rowSpan || 1;
+          const colSpan = covering.cell.colSpan || 1;
+          for (let dr = 0; dr < rowSpan; dr++) {
+            for (let dc = 0; dc < colSpan; dc++) {
+              expanded.add(getCoordinate(rStart + dr, cStart + dc));
+            }
           }
         }
       } else {
@@ -147,6 +164,66 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
   // normalizeSelection: only expands to include full merged cells, NO bounding-box fill.
   // Enables non-rectangular (L/T/custom shape) Ctrl+click selections.
   const normalizeSelection = (coords) => expandSelection(coords);
+
+  // BFS adjacency check — returns true only if all coords form a single connected region
+  // (each cell reachable from any other via horizontal/vertical neighbours).
+  const isConnectedSelection = (coords) => {
+    if (coords.length <= 1) return true;
+    const coordSet = new Set(coords);
+    const visited = new Set();
+    const queue = [coords[0]];
+    visited.add(coords[0]);
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      const [rowLabel, colStr] = curr.split('-');
+      const r = getRowIndex(rowLabel);
+      const c = parseInt(colStr, 10) - 1;
+      const neighbours = [
+        getCoordinate(r - 1, c),
+        getCoordinate(r + 1, c),
+        getCoordinate(r, c - 1),
+        getCoordinate(r, c + 1)
+      ];
+      neighbours.forEach(n => {
+        if (coordSet.has(n) && !visited.has(n)) {
+          visited.add(n);
+          queue.push(n);
+        }
+      });
+    }
+    return visited.size === coords.length;
+  };
+
+  // ── Shape geometry utilities ─────────────────────────────────────────────
+
+  // Returns true when coords exactly fill their bounding rectangle (no gaps).
+  // Rectangular merges use CSS rowSpan/colSpan; irregular ones use extension cells.
+  const isRectangularShape = (coords) => {
+    if (!coords || coords.length <= 1) return true;
+    const rowSet = new Set();
+    const colSet = new Set();
+    coords.forEach(coord => {
+      const [rowLabel, colStr] = coord.split('-');
+      rowSet.add(getRowIndex(rowLabel));
+      colSet.add(parseInt(colStr, 10) - 1);
+    });
+    return coords.length === rowSet.size * colSet.size;
+  };
+
+  // For an extension cell, returns which of its four sides touch another cell
+  // that belongs to the same merged shape. Used to selectively suppress borders
+  // so connected extension cells look visually fused.
+  const getShapeConnectorSides = (coord, coordSet) => {
+    const [rowLabel, colStr] = coord.split('-');
+    const r = getRowIndex(rowLabel);
+    const c = parseInt(colStr, 10) - 1;
+    return {
+      top:    coordSet.has(getCoordinate(r - 1, c)),
+      bottom: coordSet.has(getCoordinate(r + 1, c)),
+      left:   coordSet.has(getCoordinate(r, c - 1)),
+      right:  coordSet.has(getCoordinate(r, c + 1))
+    };
+  };
 
   // Drag selection handlers
   const handleCellMouseDown = (coordinate, e) => {
@@ -237,8 +314,16 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     setLastClickedCoord(null);
   };
 
-  const handleMergeSelectedCells = (resolvedCategory = null, resolvedProducts = null) => {
+  const handleMergeSelectedCells = (resolvedCategory = null, resolvedProducts = null, resolvedType = null) => {
     if (selectedCoords.length <= 1) return;
+
+    // ── Feature 1: Adjacency Validation ──────────────────────────────────────
+    // Block merge if selected cells do not form a single connected region.
+    if (!isConnectedSelection(selectedCoords)) {
+      setAdjacencyError('Cannot merge: selected cells are not adjacent. Only horizontally or vertically connected cells can be merged.');
+      setTimeout(() => setAdjacencyError(null), 3500);
+      return;
+    }
 
     // Compute bounding box for CSS grid placement
     let minR = Infinity, maxR = -Infinity;
@@ -259,7 +344,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
     // Gather data from all source cells
     const categoriesFound = new Set();
-    const cellsWithProducts = []; // { coord, products, category }
+    const typesFound = new Set();          // 'Normal' | 'Freezer' | 'Obstacle'
+    const cellsWithProducts = [];          // { coord, products, category }
     let totalMaxPallets = 0;
     const updatedCells = { ...cells };
 
@@ -271,10 +357,28 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         }
         totalMaxPallets += cell.maxPallets !== undefined ? cell.maxPallets : 8;
         if (cell.category) categoriesFound.add(cell.category);
+        // Detect semantic cell type for conflict resolution
+        if (cell.isObstacle) typesFound.add('Obstacle');
+        else if (cell.isRefrigerated) typesFound.add('Freezer');
+        else typesFound.add('Normal');
       } else {
         totalMaxPallets += 8;
+        typesFound.add('Normal');
       }
     });
+
+    // ── Feature 2: Step 0 — Type Conflict (Freezer / Normal / Obstacle) ──────
+    if (typesFound.size > 1 && resolvedType === null) {
+      setTypeConflict({
+        types: Array.from(typesFound),
+        onResolve: (chosenType) => {
+          setTypeConflict(null);
+          handleMergeSelectedCells(resolvedCategory, resolvedProducts, chosenType);
+        },
+        onCancel: () => setTypeConflict(null)
+      });
+      return;
+    }
 
     // Step 1: Category conflict — show dialog if categories differ
     if (categoriesFound.size > 1 && resolvedCategory === null) {
@@ -282,7 +386,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         categories: Array.from(categoriesFound),
         onResolve: (chosenCategory) => {
           setMergeConflict(null);
-          handleMergeSelectedCells(chosenCategory, resolvedProducts);
+          handleMergeSelectedCells(chosenCategory, resolvedProducts, resolvedType);
         },
         onCancel: () => setMergeConflict(null)
       });
@@ -296,7 +400,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         onKeep: (chosenCoord) => {
           const src = cellsWithProducts.find(s => s.coord === chosenCoord);
           setMergeContentConflict(null);
-          handleMergeSelectedCells(resolvedCategory, src?.products || []);
+          handleMergeSelectedCells(resolvedCategory, src?.products || [], resolvedType);
         },
         onCombine: () => {
           const combined = [];
@@ -306,7 +410,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
             });
           });
           setMergeContentConflict(null);
-          handleMergeSelectedCells(resolvedCategory, combined);
+          handleMergeSelectedCells(resolvedCategory, combined, resolvedType);
         },
         onCancel: () => setMergeContentConflict(null)
       });
@@ -325,6 +429,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       finalProducts = cellsWithProducts.length === 1 ? cellsWithProducts[0].products : [];
     }
 
+    // Resolve type flags from the chosen (or inferred) cell type
+    const finalType = resolvedType || (typesFound.size === 1 ? Array.from(typesFound)[0] : 'Normal');
+    const finalIsRefrigerated = finalType === 'Freezer';
+    const finalIsObstacle = finalType === 'Obstacle';
+
     // Apply merge: each non-primary coord gets a coveredBy pointer
     selectedCoords.forEach(coord => {
       if (coord !== primaryCoord) {
@@ -332,19 +441,74 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       }
     });
 
-    // Primary cell stores the full mergedCoords list + bounding-box spans
+    // Detect if the selected shape is a perfect rectangle.
+    // - Rectangular → use CSS rowSpan/colSpan so the primary element spans the area
+    //   and covered secondaries are hidden (return null in render).
+    // - Irregular (L/T/custom) → primary renders at 1×1; each secondary renders
+    //   as a styled "extension cell" so the gap-less bounding-box does NOT
+    //   accidentally swallow unselected neighbour cells.
+    const isIrregular = !isRectangularShape(selectedCoords);
+    const finalRowSpan = isIrregular ? 1 : rowSpan;
+    const finalColSpan = isIrregular ? 1 : colSpan;
+
+    // Primary cell stores precise mergedCoords list + shape metadata
     updatedCells[primaryCoord] = {
       coordinate: primaryCoord,
       category: targetCategory,
       products: finalProducts,
       maxPallets: totalMaxPallets,
-      rowSpan,
-      colSpan,
-      mergedCoords: [...selectedCoords]
+      rowSpan: finalRowSpan,
+      colSpan: finalColSpan,
+      mergedCoords: [...selectedCoords],
+      isIrregular,
+      ...(finalIsRefrigerated ? { isRefrigerated: true } : {}),
+      ...(finalIsObstacle ? { isObstacle: true } : {})
     };
 
     onUpdateWarehouse({ ...warehouse, cells: updatedCells });
     setSelectedCoords([]);
+  };
+
+  // ── Feature 3: Core unmerge execution ─────────────────────────────────────
+  // Splits a merged primary cell back into individual cells and applies the
+  // resolved product assignments (null = no products on any cell).
+  const performUnmerge = (primaryCoord, cell, mergedCoords, manualAssignments, pendingToAdd) => {
+    const updatedCells = { ...cells };
+    mergedCoords.forEach(coord => {
+      const assignedProducts = manualAssignments ? (manualAssignments[coord] || []) : [];
+      updatedCells[coord] = {
+        coordinate: coord,
+        category: assignedProducts.length > 0
+          ? (cell.category || '')
+          : (coord === primaryCoord ? cell.category || '' : ''),
+        products: assignedProducts,
+        maxPallets: 8,
+        ...(coord === primaryCoord && cell.isObstacle ? { isObstacle: true } : {}),
+        ...(coord === primaryCoord && cell.isPath ? { isPath: true } : {}),
+        ...(coord === primaryCoord && cell.isRefrigerated ? { isRefrigerated: true } : {})
+      };
+    });
+    const currentPending = warehouse.pendingProducts || [];
+    onUpdateWarehouse({
+      ...warehouse,
+      cells: updatedCells,
+      pendingProducts: [...currentPending, ...(pendingToAdd || [])]
+    });
+    setSelectedCoords([]);
+    setUnmergeDistribution(null);
+  };
+
+  // Confirm distribution choice from the distribution modal
+  const handleConfirmDistribution = (mode, manualAssignments = null, pendingProducts = null) => {
+    if (!unmergeDistribution) return;
+    const { primaryCoord, cell, mergedCoords, products } = unmergeDistribution;
+    if (mode === 'clear') {
+      // All products move to the warehouse-level pending pool; restore cells empty
+      performUnmerge(primaryCoord, cell, mergedCoords, null, products);
+    } else {
+      // Manual distribution — each cell gets its assigned product subset
+      performUnmerge(primaryCoord, cell, mergedCoords, manualAssignments, pendingProducts || []);
+    }
   };
 
   // Unmerge: restore merged cell back into individual cells
@@ -359,40 +523,26 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         break;
       }
     }
-
     if (!primaryCoord) return;
 
-    const updatedCells = { ...cells };
-    const cell = updatedCells[primaryCoord];
-
-    // Restore every coord that was part of this merge
+    const cell = cells[primaryCoord];
     const mergedCoords = cell.mergedCoords || [primaryCoord];
-    mergedCoords.forEach(coord => {
-      if (coord === primaryCoord) {
-        // Keep the primary's products/category, strip span/merge metadata
-        const restored = {
-          coordinate: primaryCoord,
-          category: cell.category || '',
-          products: cell.products || [],
-          maxPallets: 8,
-          isObstacle: cell.isObstacle || false,
-          isPath: cell.isPath || false
-        };
-        if (cell.isRefrigerated) restored.isRefrigerated = true;
-        updatedCells[primaryCoord] = restored;
-      } else {
-        // Restore sub-cells as clean empty cells
-        updatedCells[coord] = {
-          coordinate: coord,
-          category: '',
-          products: [],
-          maxPallets: 8
-        };
-      }
-    });
+    const hasProducts = cell.products && cell.products.length > 0;
 
-    onUpdateWarehouse({ ...warehouse, cells: updatedCells });
-    setSelectedCoords([]);
+    if (hasProducts) {
+      // Open the inventory distribution modal before making any state changes
+      setUnmergeDistribution({
+        primaryCoord,
+        cell,
+        mergedCoords,
+        products: cell.products,
+        mode: 'select',   // 'select' | 'manual'
+        productCellMap: {}
+      });
+    } else {
+      // No inventory — instant unmerge with no modal
+      performUnmerge(primaryCoord, cell, mergedCoords, null, null);
+    }
   };
 
   // Remove cells: mark selected cells as removed (leaves blank space in grid)
@@ -913,6 +1063,271 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         </div>
       )}
 
+      {/* ── Feature 2: Type Conflict Dialog ─────────────────────────────────── */}
+      {typeConflict && (
+        <div style={styles.conflictOverlay} className="animate-fade-in">
+          <div style={{
+            ...styles.conflictDialog,
+            border: '1px solid rgba(139,92,246,0.4)',
+            boxShadow: '0 0 40px rgba(139,92,246,0.12)'
+          }} className="card glass">
+            <div style={styles.conflictHeader}>
+              <span style={styles.conflictIcon}>🔀</span>
+              <div>
+                <h4 style={styles.conflictTitle}>Cell Type Conflict Detected</h4>
+                <p style={styles.conflictDesc}>
+                  The selected cells include different types: <strong>{typeConflict.types.join(', ')}</strong>.
+                  Choose which type the merged cell should adopt:
+                </p>
+              </div>
+            </div>
+            <div style={styles.conflictCategories}>
+              {typeConflict.types.map(type => {
+                const icon = type === 'Freezer' ? '❄️' : type === 'Obstacle' ? '🚧' : '📦';
+                const color = type === 'Freezer' ? '#38bdf8' : type === 'Obstacle' ? 'var(--warning)' : 'var(--success)';
+                return (
+                  <button
+                    key={type}
+                    className="btn btn-secondary"
+                    style={{ ...styles.conflictCatBtn, borderColor: `${color}66`, color }}
+                    onClick={() => typeConflict.onResolve(type)}
+                  >
+                    {icon} {type}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={styles.conflictActions}>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                onClick={typeConflict.onCancel}
+              >
+                Cancel Merge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Feature 3: Unmerge Inventory Distribution Modal ──────────────────── */}
+      {unmergeDistribution && (
+        <div style={styles.conflictOverlay} className="animate-fade-in">
+          <div style={{
+            ...styles.conflictDialog,
+            maxWidth: '680px',
+            maxHeight: '84vh',
+            overflowY: 'auto',
+            border: '1px solid rgba(59,130,246,0.35)',
+            boxShadow: '0 0 50px rgba(59,130,246,0.12)'
+          }} className="card glass">
+
+            {/* Header */}
+            <div style={styles.conflictHeader}>
+              <span style={styles.conflictIcon}>🔓</span>
+              <div style={{ flex: 1 }}>
+                <h4 style={styles.conflictTitle}>Unmerge &amp; Distribute Inventory</h4>
+                <p style={styles.conflictDesc}>
+                  Merged cell{' '}
+                  <strong style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>
+                    {unmergeDistribution.primaryCoord}
+                  </strong>{' '}
+                  contains <strong>{unmergeDistribution.products.length}</strong> product variant
+                  {unmergeDistribution.products.length > 1 ? 's' : ''}. Choose how to distribute
+                  across <strong>{unmergeDistribution.mergedCoords.length}</strong> restored cells.
+                </p>
+              </div>
+            </div>
+
+            {/* Restored cells pill preview */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+              {unmergeDistribution.mergedCoords.map(c => (
+                <span key={c} style={{
+                  fontFamily: 'monospace', fontSize: '0.78rem', fontWeight: '700',
+                  backgroundColor: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)',
+                  color: 'var(--primary)', padding: '0.2rem 0.55rem', borderRadius: '6px'
+                }}>{c}</span>
+              ))}
+            </div>
+
+            {/* ─ Mode: initial choice ─────────────────────────────────────────── */}
+            {unmergeDistribution.mode === 'select' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    textAlign: 'left', padding: '1.1rem 1.25rem',
+                    display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-start',
+                    borderColor: 'rgba(59,130,246,0.3)'
+                  }}
+                  onClick={() => setUnmergeDistribution(prev => ({
+                    ...prev,
+                    mode: 'manual',
+                    productCellMap: Object.fromEntries(
+                      prev.products.map((_, i) => [i, '__unassign__'])
+                    )
+                  }))}
+                >
+                  <span style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--primary)' }}>📋 Manual Assignment</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Manually choose which restored cell receives each product SKU</span>
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    textAlign: 'left', padding: '1.1rem 1.25rem',
+                    display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-start',
+                    color: 'var(--warning)', borderColor: 'rgba(245,158,11,0.35)'
+                  }}
+                  onClick={() => handleConfirmDistribution('clear')}
+                >
+                  <span style={{ fontWeight: '700', fontSize: '0.95rem' }}>📤 Clear &amp; Unassign</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Restore all cells empty — move stock to the pending unassigned pool
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* ─ Mode: manual product-to-cell assignment ──────────────────────── */}
+            {unmergeDistribution.mode === 'manual' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                  Assign each product variant to a restored cell, or leave it as <em>Unassigned</em> to move it to the pending pool.
+                </p>
+
+                {/* Product assignment rows */}
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: '0.55rem',
+                  maxHeight: '38vh', overflowY: 'auto', paddingRight: '0.25rem'
+                }}>
+                  {unmergeDistribution.products.map((product, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex', alignItems: 'center', gap: '0.85rem',
+                      padding: '0.65rem 0.9rem', borderRadius: '9px',
+                      backgroundColor: 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border-color)'
+                    }}>
+                      {/* Product info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontWeight: '600', fontSize: '0.86rem', color: 'var(--text-primary)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                        }}>
+                          {product.name || `Product ${idx + 1}`}
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
+                          {product.sku ? `SKU: ${product.sku}` : ''}
+                          {product.sku && product.palletCount ? '  ·  ' : ''}
+                          {product.palletCount ? `${product.palletCount} pallets` : ''}
+                        </div>
+                      </div>
+
+                      {/* Cell selector */}
+                      <select
+                        value={unmergeDistribution.productCellMap[idx] ?? '__unassign__'}
+                        onChange={e => setUnmergeDistribution(prev => ({
+                          ...prev,
+                          productCellMap: { ...prev.productCellMap, [idx]: e.target.value }
+                        }))}
+                        style={{
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-color)',
+                          color: 'var(--text-primary)',
+                          borderRadius: '7px',
+                          padding: '0.35rem 0.55rem',
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          minWidth: '130px'
+                        }}
+                      >
+                        <option value="__unassign__">📤 Unassign</option>
+                        {unmergeDistribution.mergedCoords.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer actions */}
+                <div style={{
+                  display: 'flex', gap: '0.75rem', justifyContent: 'flex-end',
+                  borderTop: '1px solid var(--border-color)', paddingTop: '0.85rem'
+                }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => setUnmergeDistribution(prev => ({ ...prev, mode: 'select' }))}
+                  >
+                    ← Back
+                  </button>
+                  {/* Live assignment summary */}
+                  {(() => {
+                    const { products, mergedCoords, productCellMap } = unmergeDistribution;
+                    const assignedCount = products.filter((_, i) =>
+                      (productCellMap[i] ?? '__unassign__') !== '__unassign__'
+                    ).length;
+                    const pendingCount = products.length - assignedCount;
+                    return (
+                      <div style={{
+                        fontSize: '0.78rem', color: 'var(--text-secondary)',
+                        display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'
+                      }}>
+                        <span>
+                          <strong style={{ color: 'var(--success)' }}>{assignedCount}</strong> assigned
+                        </span>
+                        {pendingCount > 0 && (
+                          <span>
+                            <strong style={{ color: 'var(--warning)' }}>{pendingCount}</strong> → pending pool
+                          </span>
+                        )}
+                        {assignedCount === 0 && (
+                          <span style={{ color: 'var(--danger)', fontSize: '0.73rem' }}>
+                            ⚠ All products will be unassigned
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.85rem', padding: '0.4rem 1.1rem' }}
+                    onClick={() => {
+                      const { products, mergedCoords, productCellMap } = unmergeDistribution;
+                      const assignments = Object.fromEntries(mergedCoords.map(c => [c, []]));
+                      const pending = [];
+                      products.forEach((p, idx) => {
+                        const dest = productCellMap[idx] ?? '__unassign__';
+                        if (dest === '__unassign__' || !assignments[dest]) {
+                          pending.push(p);
+                        } else {
+                          assignments[dest].push(p);
+                        }
+                      });
+                      handleConfirmDistribution('manual', assignments, pending);
+                    }}
+                  >
+                    ✅ Confirm Distribution
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Cancel */}
+            <div style={styles.conflictActions}>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                onClick={() => setUnmergeDistribution(null)}
+              >
+                Cancel Unmerge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metrics Stats Dashboard */}
       <div style={styles.metricsRow}>
         <div className="card glass" style={styles.metricCard}>
@@ -1037,7 +1452,82 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
                   const covering = getCoveringCell(cells, coordinate);
                   if (covering && covering.primaryCoord !== coordinate) {
-                    return null; // Skip rendering covered coordinates
+                    // ── Coordinate-Map Architecture ────────────────────────────
+                    // For IRREGULAR (non-rectangular) merged shapes, each non-primary
+                    // coordinate must still render its own DOM node (an "extension
+                    // cell") so the CSS grid does not swallow unrelated cells that
+                    // fall inside the bounding box but are NOT part of the shape.
+                    // For RECTANGULAR merges the primary's rowSpan/colSpan covers
+                    // every secondary slot, so we return null as before.
+                    const primaryCellData = cells[covering.primaryCoord];
+                    if (primaryCellData?.isIrregular) {
+                      const shapeCoordSet = new Set(primaryCellData.mergedCoords || []);
+                      const sides = getShapeConnectorSides(coordinate, shapeCoordSet);
+                      const primStats = getCellStats(covering.primaryCoord);
+                      const extCapStyle = getCapacityStyles(
+                        primStats.pallets, primStats.maxPallets,
+                        primStats.isObstacle, primStats.obstacleType,
+                        primStats.minThreshold, primStats.isPath
+                      );
+                      const isExtSelected = selectedCoords.includes(coordinate);
+                      // Derive accent colour for the extension tile
+                      const extAccent = primaryCellData.isRefrigerated
+                        ? '#38bdf8'
+                        : primaryCellData.isObstacle
+                          ? 'rgba(245,158,11,0.6)'
+                          : extCapStyle.color || 'var(--primary)';
+                      const extBg = primaryCellData.isRefrigerated
+                        ? 'linear-gradient(145deg,rgba(8,28,52,0.85) 0%,rgba(10,45,85,0.75) 100%)'
+                        : primaryCellData.isObstacle
+                          ? 'repeating-linear-gradient(45deg,rgba(31,41,55,0.4),rgba(31,41,55,0.4) 8px,rgba(75,85,99,0.2) 8px,rgba(75,85,99,0.2) 16px)'
+                          : (extCapStyle.bg || 'rgba(59,130,246,0.05)');
+                      return (
+                        <div
+                          key={coordinate}
+                          onMouseDown={(e) => handleCellMouseDown(coordinate, e)}
+                          onMouseEnter={() => handleCellMouseEnter(coordinate)}
+                          onClick={() => handleCellClick(covering.primaryCoord)}
+                          title={`Extension of merged cell ${covering.primaryCoord.replace('-', '')}`}
+                          style={{
+                            ...styles.gridCell,
+                            gridRowStart: r + 2,
+                            gridRowEnd:   r + 3,
+                            gridColumnStart: c + 2,
+                            gridColumnEnd:   c + 3,
+                            background: extBg,
+                            // Suppress shared edges so adjacent extension tiles look fused
+                            borderTopColor:    sides.top    ? 'transparent' : (isExtSelected ? 'var(--primary)' : extAccent + '55'),
+                            borderBottomColor: sides.bottom ? 'transparent' : (isExtSelected ? 'var(--primary)' : extAccent + '55'),
+                            borderLeftColor:   sides.left   ? 'transparent' : (isExtSelected ? 'var(--primary)' : extAccent + '55'),
+                            borderRightColor:  sides.right  ? 'transparent' : (isExtSelected ? 'var(--primary)' : extAccent + '55'),
+                            borderStyle: 'dashed',
+                            borderWidth: isExtSelected ? '2px' : '1px',
+                            boxShadow: isExtSelected ? `0 0 0 2px var(--primary)` : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            opacity: 0.82,
+                            minHeight: '115px'
+                          }}
+                          className={`grid-cell-extension ${isExtSelected ? 'selected' : ''}`}
+                        >
+                          <span style={{
+                            fontSize: '0.6rem',
+                            fontFamily: 'monospace',
+                            fontWeight: '700',
+                            color: extAccent,
+                            opacity: 0.7,
+                            letterSpacing: '0.02em',
+                            userSelect: 'none'
+                          }}>
+                            ↳ {covering.primaryCoord.replace('-', '')}
+                          </span>
+                        </div>
+                      );
+                    }
+                    // Rectangular merge: primary's CSS span covers this slot
+                    return null;
                   }
 
                   const stats = getCellStats(coordinate);
@@ -1046,6 +1536,9 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
                   const cellRowSpan = cell.rowSpan || 1;
                   const cellColSpan = cell.colSpan || 1;
+                  // A merged cell is custom-shaped when isIrregular === true
+                  const isMergedCell = !!(cell.mergedCoords && cell.mergedCoords.length > 1);
+                  const mergedCellCount = cell.mergedCoords?.length || 1;
 
                   // Render cell if it is configured as an Obstacle
                   if (stats.isObstacle) {
@@ -1206,6 +1699,21 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                     >
                       <div style={styles.cellTop}>
                         <span style={styles.cellCoordinate}>{row}{col}</span>
+                        {isMergedCell && (
+                          <span style={{
+                            fontSize: '0.58rem',
+                            backgroundColor: cell.isIrregular ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.1)',
+                            border: `1px solid ${cell.isIrregular ? 'rgba(139,92,246,0.4)' : 'rgba(59,130,246,0.3)'}`,
+                            color: cell.isIrregular ? '#a78bfa' : 'var(--primary)',
+                            padding: '0.1rem 0.3rem',
+                            borderRadius: '4px',
+                            fontWeight: '700',
+                            letterSpacing: '0.02em',
+                            flexShrink: 0
+                          }}>
+                            {cell.isIrregular ? '⬡' : '⬜'} ×{mergedCellCount}
+                          </span>
+                        )}
                         {stats.pallets > 0 && (
                           <span style={styles.variantCountBadge}>
                             {stats.count} SKU{stats.count > 1 ? 's' : ''}
@@ -1249,6 +1757,47 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
           </div>
         </div>
       </div>
+
+      {/* ── Feature 1: Adjacency Error Toast ────────────────────────────────── */}
+      {adjacencyError && (
+        <div
+          className="toast-slide-in"
+          style={{
+            position: 'fixed',
+            bottom: '2rem',
+            right: '2rem',
+            zIndex: 9999,
+            backgroundColor: 'rgba(20,10,10,0.96)',
+            border: '1px solid rgba(239,68,68,0.55)',
+            borderRadius: '13px',
+            padding: '1rem 1.1rem',
+            maxWidth: '390px',
+            boxShadow: '0 10px 40px rgba(239,68,68,0.22)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.85rem',
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          <span style={{ fontSize: '1.5rem', flexShrink: 0, lineHeight: 1 }}>⛔</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '700', color: 'var(--danger)', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+              Merge Blocked — Non-Adjacent Selection
+            </div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+              {adjacencyError}
+            </div>
+          </div>
+          <button
+            onClick={() => setAdjacencyError(null)}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text-muted)',
+              cursor: 'pointer', fontSize: '1.1rem', flexShrink: 0, padding: 0, lineHeight: 1
+            }}
+            title="Dismiss"
+          >×</button>
+        </div>
+      )}
 
       {/* Embedded CSS for Cell hover and pulse alert animations */}
       <style>{`
@@ -1317,6 +1866,21 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         .removed-cell-slot:hover {
           visibility: visible !important;
           opacity: 0.8;
+        }
+        /* Extension cells: hover brightens and shows the entire shape's selection ring */
+        .grid-cell-extension {
+          transition: opacity 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        }
+        .grid-cell-extension:hover {
+          opacity: 1 !important;
+          z-index: 4;
+        }
+        @keyframes toastSlideIn {
+          from { transform: translateX(110%); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+        .toast-slide-in {
+          animation: toastSlideIn 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
         }
       `}</style>
     </div>
