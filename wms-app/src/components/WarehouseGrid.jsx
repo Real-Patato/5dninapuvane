@@ -397,7 +397,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         totalMaxPallets += cell.maxPallets !== undefined ? cell.maxPallets : 8;
         if (cell.category) categoriesFound.add(cell.category);
         // Detect semantic cell type for conflict resolution
-        if (cell.isObstacle) typesFound.add('Obstacle');
+        if (cell.isPath || cell.isRoadline) typesFound.add('Path/Road');
+        else if (cell.isObstacle) typesFound.add('Obstacle');
         else if (cell.isRefrigerated) typesFound.add('Freezer');
         else typesFound.add('Normal');
       } else {
@@ -406,10 +407,11 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       }
     });
 
-    // ── Feature 2: Step 0 — Type Conflict (Freezer / Normal / Obstacle) ──────
+    // ── Feature 2: Step 0 — Type Conflict (Path/Road vs Freezer / Normal / Obstacle) ──────
     if (typesFound.size > 1 && resolvedType === null) {
       setTypeConflict({
         types: Array.from(typesFound),
+        isPathConflict: typesFound.has('Path/Road'),
         onResolve: (chosenType) => {
           setTypeConflict(null);
           handleMergeSelectedCells(resolvedCategory, resolvedProducts, chosenType);
@@ -472,6 +474,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     const finalType = resolvedType || (typesFound.size === 1 ? Array.from(typesFound)[0] : 'Normal');
     const finalIsRefrigerated = finalType === 'Freezer';
     const finalIsObstacle = finalType === 'Obstacle';
+    const finalIsPath = finalType === 'Path/Road' || finalType === 'Path';
 
     // Apply merge: each non-primary coord gets a coveredBy pointer
     selectedCoords.forEach(coord => {
@@ -501,7 +504,8 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       mergedCoords: [...selectedCoords],
       isIrregular,
       ...(finalIsRefrigerated ? { isRefrigerated: true } : {}),
-      ...(finalIsObstacle ? { isObstacle: true } : {})
+      ...(finalIsObstacle ? { isObstacle: true } : {}),
+      ...(finalIsPath ? { isPath: true } : {})
     };
 
     onUpdateWarehouse({ ...warehouse, cells: updatedCells });
@@ -1107,31 +1111,47 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
         <div style={styles.conflictOverlay} className="animate-fade-in">
           <div style={{
             ...styles.conflictDialog,
-            border: '1px solid rgba(139,92,246,0.4)',
-            boxShadow: '0 0 40px rgba(139,92,246,0.12)'
+            border: typeConflict.isPathConflict ? '1px solid rgba(245,158,11,0.5)' : '1px solid rgba(139,92,246,0.4)',
+            boxShadow: typeConflict.isPathConflict ? '0 0 40px rgba(245,158,11,0.15)' : '0 0 40px rgba(139,92,246,0.12)'
           }} className="card glass">
             <div style={styles.conflictHeader}>
-              <span style={styles.conflictIcon}>🔀</span>
+              <span style={styles.conflictIcon}>{typeConflict.isPathConflict ? '⚠️' : '🔀'}</span>
               <div>
-                <h4 style={styles.conflictTitle}>Cell Type Conflict Detected</h4>
+                <h4 style={styles.conflictTitle}>
+                  {typeConflict.isPathConflict ? 'Path / Road Cell Merge Conflict' : 'Cell Type Conflict Detected'}
+                </h4>
                 <p style={styles.conflictDesc}>
-                  The selected cells include different types: <strong>{typeConflict.types.join(', ')}</strong>.
-                  Choose which type the merged cell should adopt:
+                  The selected cells include conflicting types: <strong>{typeConflict.types.join(', ')}</strong>.
+                  <br />
+                  <span style={{ color: 'var(--text-primary)', fontWeight: '600' }}>
+                    Which layout type and content do you want to preserve in the new merged cell?
+                  </span>
                 </p>
               </div>
             </div>
             <div style={styles.conflictCategories}>
               {typeConflict.types.map(type => {
-                const icon = type === 'Freezer' ? '❄️' : type === 'Obstacle' ? '🚧' : '📦';
-                const color = type === 'Freezer' ? '#38bdf8' : type === 'Obstacle' ? 'var(--warning)' : 'var(--success)';
+                const isPathType = type === 'Path/Road' || type === 'Path';
+                const icon = isPathType ? '🛣️' : type === 'Freezer' ? '❄️' : type === 'Obstacle' ? '🚧' : '📦';
+                const color = isPathType ? '#f59e0b' : type === 'Freezer' ? '#38bdf8' : type === 'Obstacle' ? 'var(--warning)' : 'var(--success)';
+                const labelDesc = isPathType ? 'Preserve Path/Road Configuration' : `Preserve ${type} Layout`;
                 return (
                   <button
                     key={type}
                     className="btn btn-secondary"
-                    style={{ ...styles.conflictCatBtn, borderColor: `${color}66`, color }}
+                    style={{
+                      ...styles.conflictCatBtn,
+                      borderColor: `${color}66`,
+                      color,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      padding: '0.8rem'
+                    }}
                     onClick={() => typeConflict.onResolve(type)}
                   >
-                    {icon} {type}
+                    <span style={{ fontSize: '1.2rem', marginBottom: '0.2rem' }}>{icon} {type}</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.85, fontWeight: 'normal' }}>{labelDesc}</span>
                   </button>
                 );
               })}
@@ -1142,7 +1162,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                 style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}
                 onClick={typeConflict.onCancel}
               >
-                Cancel Merge
+                Cancel Merge Operation
               </button>
             </div>
           </div>

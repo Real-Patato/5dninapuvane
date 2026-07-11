@@ -48,10 +48,42 @@ export default function App() {
   // Initialize Storage & Active Session
   useEffect(() => {
     initializeStorage();
-    const sessionUser = getCurrentUser();
-    if (sessionUser) {
-      setLocalCurrentUser(sessionUser);
-      setPage('dashboard');
+    const token = localStorage.getItem('wms_auth_token');
+    if (token) {
+      fetch('/api/auth/session', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.user) {
+            setCurrentUser(data.user);
+            setLocalCurrentUser(data.user);
+            setPage('dashboard');
+          } else {
+            // Token expired or user removed
+            localStorage.removeItem('wms_auth_token');
+            const localUser = getCurrentUser();
+            if (localUser) {
+              setLocalCurrentUser(localUser);
+              setPage('dashboard');
+            }
+          }
+        })
+        .catch(() => {
+          // Offline fallback
+          const sessionUser = getCurrentUser();
+          if (sessionUser) {
+            setLocalCurrentUser(sessionUser);
+            setPage('dashboard');
+          }
+        });
+    } else {
+      const sessionUser = getCurrentUser();
+      if (sessionUser) {
+        setLocalCurrentUser(sessionUser);
+        setPage('dashboard');
+      }
     }
 
     // Load data from Storage
