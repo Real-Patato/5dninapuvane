@@ -5,6 +5,8 @@ export default function CellModal({
   coordinate,
   cellData,
   customFields,
+  warehouse,
+  onUpdateWarehouse,
   onClose,
   onSaveCellData
 }) {
@@ -15,6 +17,7 @@ export default function CellModal({
   const [isPath, setIsPath] = useState(cellData.isPath || false);
   const [isRefrigerated, setIsRefrigerated] = useState(cellData.isRefrigerated || false);
   const [obstacleType, setObstacleType] = useState(cellData.obstacleType || 'pillar');
+  const [breakApart, setBreakApart] = useState(false);
 
   // Custom capacity & alerts states
   const [maxPallets, setMaxPallets] = useState(cellData.maxPallets !== undefined ? cellData.maxPallets : 8);
@@ -65,6 +68,7 @@ export default function CellModal({
     setObstacleType(cellData?.obstacleType || 'pillar');
     setMaxPallets(cellData?.maxPallets !== undefined ? cellData.maxPallets : 8);
     setMinThreshold(cellData?.minThreshold !== undefined ? cellData.minThreshold : '');
+    setBreakApart(false);
     resetForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coordinate, resetForm]);
@@ -82,7 +86,9 @@ export default function CellModal({
       mergedCoords: cellData.mergedCoords,
       obstacleType: extraProps.obstacleType !== undefined ? extraProps.obstacleType : obstacleType,
       maxPallets: extraProps.maxPallets !== undefined ? extraProps.maxPallets : maxPallets,
-      minThreshold: extraProps.minThreshold !== undefined ? extraProps.minThreshold : minThreshold
+      minThreshold: extraProps.minThreshold !== undefined ? extraProps.minThreshold : minThreshold,
+      breakApart: extraProps.breakApart !== undefined ? extraProps.breakApart : breakApart,
+      pendingProductsToAdd: extraProps.pendingProductsToAdd
     });
   };
 
@@ -210,14 +216,35 @@ export default function CellModal({
     resetForm();
   };
 
+  const handlePullFromBuffer = (bufferProd, indexInBuffer) => {
+    if (!warehouse || !onUpdateWarehouse) return;
+    const productsList = [...(cellData.products || [])];
+    const newProd = {
+      ...bufferProd,
+      id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    };
+    productsList.push(newProd);
+    const finalCategory = category || cellData.category || bufferProd.category || 'General Storage';
+    triggerSave(productsList, finalCategory);
+
+    // Remove from unassigned buffer
+    const updatedPending = (warehouse.pendingProducts || []).filter((_, i) => i !== indexInBuffer);
+    onUpdateWarehouse({
+      ...warehouse,
+      pendingProducts: updatedPending
+    });
+  };
+
   const handleObstacleSubmit = (e) => {
     e.preventDefault();
-    // Save as obstacle: clearing products and category
+    const pendingToAdd = (breakApart && !isCellEmpty) ? [...(cellData.products || [])] : undefined;
     triggerSave([], '', {
       isObstacle: true,
       isPath: false,
       isRefrigerated: false,
-      obstacleType: obstacleType
+      obstacleType: obstacleType,
+      breakApart,
+      pendingProductsToAdd: pendingToAdd
     });
   };
 
@@ -233,11 +260,13 @@ export default function CellModal({
 
   const handlePathSubmit = (e) => {
     e.preventDefault();
-    // Save as path: clearing products and category
+    const pendingToAdd = (breakApart && !isCellEmpty) ? [...(cellData.products || [])] : undefined;
     triggerSave([], '', {
       isPath: true,
       isObstacle: false,
-      isRefrigerated: false
+      isRefrigerated: false,
+      breakApart,
+      pendingProductsToAdd: pendingToAdd
     });
   };
 
@@ -368,6 +397,37 @@ export default function CellModal({
               )}
 
               <form onSubmit={handleObstacleSubmit} style={styles.obstacleForm}>
+                {cellData.mergedCoords && cellData.mergedCoords.length > 1 && (
+                  <div style={{ ...styles.customValuesBox, backgroundColor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', marginBottom: '1.25rem' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--warning)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      ⚡ Merged Shape Transformation Mode ({cellData.mergedCoords.length} cells)
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
+                      <input
+                        type="radio"
+                        name="obstacleBreakMode"
+                        checked={!breakApart}
+                        onChange={() => setBreakApart(false)}
+                      />
+                      <span><strong>Unified Block:</strong> Keep cells merged as a single connected obstacle block.</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.88rem' }}>
+                      <input
+                        type="radio"
+                        name="obstacleBreakMode"
+                        checked={breakApart}
+                        onChange={() => setBreakApart(true)}
+                      />
+                      <span><strong>Auto-Dissolve:</strong> Break apart into {cellData.mergedCoords.length} individual standalone 1×1 obstacle cells.</span>
+                    </label>
+                    {breakApart && !isCellEmpty && (
+                      <div style={{ marginTop: '0.6rem', fontSize: '0.8rem', color: '#38bdf8', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
+                        📦 <strong>Stock Safety:</strong> All {cellData.products.length} existing SKU variants will be safely preserved in the Unassigned Inventory Buffer.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="input-group">
                   <label className="input-label">Physical Obstacle Type</label>
                   <select
@@ -425,6 +485,37 @@ export default function CellModal({
               )}
 
               <form onSubmit={handlePathSubmit} style={styles.obstacleForm}>
+                {cellData.mergedCoords && cellData.mergedCoords.length > 1 && (
+                  <div style={{ ...styles.customValuesBox, backgroundColor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', marginBottom: '1.25rem' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--warning)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      ⚡ Merged Shape Transformation Mode ({cellData.mergedCoords.length} cells)
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
+                      <input
+                        type="radio"
+                        name="pathBreakMode"
+                        checked={!breakApart}
+                        onChange={() => setBreakApart(false)}
+                      />
+                      <span><strong>Unified Block:</strong> Keep cells merged as a single connected roadway corridor.</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.88rem' }}>
+                      <input
+                        type="radio"
+                        name="pathBreakMode"
+                        checked={breakApart}
+                        onChange={() => setBreakApart(true)}
+                      />
+                      <span><strong>Auto-Dissolve:</strong> Break apart into {cellData.mergedCoords.length} individual standalone 1×1 roadway cells.</span>
+                    </label>
+                    {breakApart && !isCellEmpty && (
+                      <div style={{ marginTop: '0.6rem', fontSize: '0.8rem', color: '#38bdf8', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
+                        📦 <strong>Stock Safety:</strong> All {cellData.products.length} existing SKU variants will be safely preserved in the Unassigned Inventory Buffer.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div style={styles.formActions}>
                   <button
                     type="submit"
@@ -449,9 +540,37 @@ export default function CellModal({
           </div>
         ) : (
           /* Normal Cell & Products View */
-          <div className="modal-body" style={styles.body}>
-            {/* Left Side: Stored Variants & Custom Threshold Configurations */}
-            <div style={styles.variantsSection}>
+          <div className="modal-body" style={{ ...styles.body, flexDirection: 'column' }}>
+            {warehouse?.pendingProducts && warehouse.pendingProducts.length > 0 && (
+              <div style={{ ...styles.customValuesBox, backgroundColor: 'rgba(139, 92, 246, 0.08)', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '1rem', marginBottom: '1.25rem', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                  <span style={{ fontWeight: 600, color: '#c084fc', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.92rem' }}>
+                    📦 Unassigned Warehouse Buffer ({warehouse.pendingProducts.length} items)
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Click "Stock Here" to pull from buffer</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  {warehouse.pendingProducts.map((p, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.4rem 0.6rem', fontSize: '0.82rem' }}>
+                      <div>
+                        <strong>{p.name}</strong> <span style={{ color: 'var(--text-muted)' }}>({p.palletCount || 1} pal.)</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handlePullFromBuffer(p, idx)}
+                        className="btn btn-icon"
+                        style={{ background: 'rgba(139, 92, 246, 0.2)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.4)', padding: '0.2rem 0.5rem', fontSize: '0.75rem', fontWeight: 600 }}
+                      >
+                        + Stock Here
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '2rem', flex: 1 }}>
+              {/* Left Side: Stored Variants & Custom Threshold Configurations */}
+              <div style={styles.variantsSection}>
               <h4 style={styles.sectionHeading}>Stored Product Variants</h4>
               {isCellEmpty ? (
                 <div style={styles.emptyState}>
@@ -794,6 +913,7 @@ export default function CellModal({
                   </button>
                 </div>
               </form>
+            </div>
             </div>
           </div>
         )}

@@ -251,8 +251,10 @@ export default function App() {
           coordinate={selectedCellCoord}
           cellData={activeCellData}
           customFields={customFields}
+          warehouse={selectedWarehouse}
           onClose={() => setSelectedCellCoord(null)}
           onSaveCellData={handleSaveCellData}
+          onUpdateWarehouse={handleUpdateWarehouse}
         />
       )}
 
