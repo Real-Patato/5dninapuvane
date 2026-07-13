@@ -45,11 +45,13 @@ export default function App() {
 
   // FIX 1: Run only ONCE on mount by stripping [currentUser] from dependencies
   useEffect(() => {
+
     async function loadSessionAndData() {
       // Optional: Initialize storage if your utils layer requires it
       if (typeof initializeStorage === 'function') {
         await initializeStorage();
       }
+
 
       const sessionUser = getCurrentUser();
       if (sessionUser) {

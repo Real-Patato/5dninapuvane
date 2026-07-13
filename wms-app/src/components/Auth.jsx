@@ -38,7 +38,9 @@ export default function Auth({ onAuthSuccess }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const handleSubmit = (e) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -48,19 +50,67 @@ export default function Auth({ onAuthSuccess }) {
       return;
     }
 
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        // Attempt live SQLite Backend API authentication
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('wms_auth_token', data.token);
+          setCurrentUser(data.user);
+          setSuccess('Authenticated securely via SQLite database!');
+          setTimeout(() => onAuthSuccess(data.user), 500);
+          return;
+        } else if (res.status !== 404) {
+          setError(data.error || 'Invalid email or password.');
+          setLoading(false);
+          return;
+        }
+      } else {
+        // Attempt live SQLite Backend API registration
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name, role: 'Warehouse Manager' })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          localStorage.setItem('wms_auth_token', data.token);
+          setCurrentUser(data.user);
+          setSuccess('Account registered securely in SQLite database! Logging in...');
+          setTimeout(() => onAuthSuccess(data.user), 800);
+          return;
+        } else if (res.status !== 404) {
+          setError(data.error || 'Failed to register account.');
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Auth API] Backend unavailable, falling back to local memory store:', err);
+    } finally {
+      setLoading(false);
+    }
+
+    // Fallback Local Memory / Offline Storage Validation
     const users = getUsers();
 
     if (isLogin) {
-      // Handle Login
       const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
       if (user) {
         setCurrentUser(user);
-        onAuthSuccess(user);
+        setSuccess('Authenticated in offline cache mode.');
+        setTimeout(() => onAuthSuccess(user), 400);
       } else {
         setError('Invalid email or password.');
       }
     } else {
-      // Handle Signup
       const userExists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
       if (userExists) {
         setError('An account with this email already exists.');
@@ -71,30 +121,55 @@ export default function Auth({ onAuthSuccess }) {
         id: `user-${Date.now()}`,
         email,
         password,
-        name
+        name,
+        role: 'Warehouse Manager'
       };
 
       saveUser(newUser);
       setCurrentUser(newUser);
-      setSuccess('Account created successfully! Logging you in...');
+      setSuccess('Account created successfully in local cache! Logging you in...');
       setTimeout(() => {
         onAuthSuccess(newUser);
-      }, 1000);
+      }, 800);
     }
   };
 
-  const handleGuestLogin = () => {
+  const handleGuestLogin = async () => {
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'admin@aetherwms.com', password: 'password123' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        localStorage.setItem('wms_auth_token', data.token);
+        setCurrentUser(data.user);
+        setSuccess('Guest demo logged in via SQLite database!');
+        setTimeout(() => onAuthSuccess(data.user), 500);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Auth API] Guest login falling back to local cache:', err);
+    } finally {
+      setLoading(false);
+    }
+
     const users = getUsers();
     const guestUser = users.find(u => u.email === 'admin@aetherwms.com');
     if (guestUser) {
       setCurrentUser(guestUser);
       onAuthSuccess(guestUser);
     } else {
-      // Fallback fallback if not initialized
       const defaultGuest = {
-        id: 'user-1',
+        id: 'user-admin-sqlite',
         email: 'admin@aetherwms.com',
-        name: 'Alex Chief'
+        name: 'Alex Chief (Admin)',
+        role: 'System Administrator'
       };
       setCurrentUser(defaultGuest);
       onAuthSuccess(defaultGuest);
