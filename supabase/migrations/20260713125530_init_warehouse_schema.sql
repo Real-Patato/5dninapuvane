@@ -66,44 +66,9 @@ CREATE TABLE IF NOT EXISTS public.cells (
   shelf_level integer NOT NULL CHECK (shelf_level >= 0),
   status text NOT NULL DEFAULT 'empty' CHECK (status IN ('empty', 'occupied', 'reserved', 'maintenance')),
   max_weight_capacity numeric CHECK (max_weight_capacity >= 0),
-  category text DEFAULT '',
-  products jsonb DEFAULT '[]'::jsonb,
-  row_span integer DEFAULT 1,
-  col_span integer DEFAULT 1,
-  merged_coords jsonb,
-  covered_by text,
-  parent_cell_id text,
-  is_merged boolean DEFAULT false,
-  is_irregular boolean DEFAULT false,
-  is_obstacle boolean DEFAULT false,
-  is_path boolean DEFAULT false,
-  is_refrigerated boolean DEFAULT false,
-  obstacle_type text DEFAULT 'pillar',
-  max_pallets integer DEFAULT 8,
-  min_threshold numeric,
-  custom_fields_values jsonb DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT NOW(),
   CONSTRAINT unique_cell_location UNIQUE (layout_id, row_index, column_index, shelf_level)
 );
-
--- Ensure all columns exist if table already existed when re-running
-ALTER TABLE public.cells
-  ADD COLUMN IF NOT EXISTS category text DEFAULT '',
-  ADD COLUMN IF NOT EXISTS products jsonb DEFAULT '[]'::jsonb,
-  ADD COLUMN IF NOT EXISTS row_span integer DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS col_span integer DEFAULT 1,
-  ADD COLUMN IF NOT EXISTS merged_coords jsonb,
-  ADD COLUMN IF NOT EXISTS covered_by text,
-  ADD COLUMN IF NOT EXISTS parent_cell_id text,
-  ADD COLUMN IF NOT EXISTS is_merged boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS is_irregular boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS is_obstacle boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS is_path boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS is_refrigerated boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS obstacle_type text DEFAULT 'pillar',
-  ADD COLUMN IF NOT EXISTS max_pallets integer DEFAULT 8,
-  ADD COLUMN IF NOT EXISTS min_threshold numeric,
-  ADD COLUMN IF NOT EXISTS custom_fields_values jsonb DEFAULT '{}'::jsonb;
 
 COMMENT ON TABLE public.cells IS 'Individual storage cells within a warehouse layout grid.';
 
