@@ -2,34 +2,6 @@ import React, { useState } from 'react';
 import { getUsers, saveUser, setCurrentUser } from '../utils/storage';
 import { supabase } from '../utils/supabaseClient';
 
-async function handleSignUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({
-    email: email,
-    password: password,
-  });
-
-  if (error) {
-    alert(error.message);
-  } else {
-    // Pass the signed-up user object up to your handleAuthSuccess in App.jsx
-    onAuthSuccess(data.user);
-  }
-}
-
-async function handleSignIn(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email,
-    password: password,
-  });
-
-  if (error) {
-    alert(error.message);
-  } else {
-    // Pass the logged-in user object up to your handleAuthSuccess in App.jsx
-    onAuthSuccess(data.user);
-  }
-}
-
 export default function Auth({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
@@ -37,7 +9,6 @@ export default function Auth({ onAuthSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -54,55 +25,84 @@ export default function Auth({ onAuthSuccess }) {
 
     try {
       if (isLogin) {
-        // Attempt live SQLite Backend API authentication
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+        // 1. Sign In using Supabase Auth
+        const { data, error: supaError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password
         });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          localStorage.setItem('wms_auth_token', data.token);
-          setCurrentUser(data.user);
-          setSuccess('Authenticated securely via SQLite database!');
-          setTimeout(() => onAuthSuccess(data.user), 500);
-          return;
-        } else if (res.status !== 404) {
-          setError(data.error || 'Invalid email or password.');
+
+        if (supaError) {
+          // Check local cache fallback for demo testing
+          const users = getUsers();
+          const localUser = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password);
+          if (localUser) {
+            setCurrentUser(localUser);
+            setSuccess('Authenticated in local/offline demo mode!');
+            setTimeout(() => onAuthSuccess(localUser), 400);
+            return;
+          }
+          setError(supaError.message || 'Invalid email or password.');
           setLoading(false);
           return;
         }
-      } else {
-        // Attempt live SQLite Backend API registration
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, name, role: 'Warehouse Manager' })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          localStorage.setItem('wms_auth_token', data.token);
-          setCurrentUser(data.user);
-          setSuccess('Account registered securely in SQLite database! Logging in...');
-          setTimeout(() => onAuthSuccess(data.user), 800);
+
+        if (data?.user) {
+          const userObj = {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
+            role: 'Warehouse Manager',
+            ...data.user
+          };
+          setCurrentUser(userObj);
+          setSuccess('Authenticated securely via Supabase!');
+          setTimeout(() => onAuthSuccess(userObj), 400);
           return;
-        } else if (res.status !== 404) {
-          setError(data.error || 'Failed to register account.');
+        }
+      } else {
+        // 2. Register using Supabase Auth
+        const { data, error: supaError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password,
+          options: {
+            data: {
+              name: name.trim(),
+              role: 'Warehouse Manager'
+            }
+          }
+        });
+
+        if (supaError) {
+          setError(supaError.message || 'Failed to register account.');
           setLoading(false);
+          return;
+        }
+
+        if (data?.user) {
+          const userObj = {
+            id: data.user.id,
+            email: email.trim(),
+            name: name.trim(),
+            role: 'Warehouse Manager',
+            ...data.user
+          };
+          saveUser(userObj);
+          setCurrentUser(userObj);
+          setSuccess('Account registered in Supabase! Entering dashboard...');
+          setTimeout(() => onAuthSuccess(userObj), 600);
           return;
         }
       }
     } catch (err) {
-      console.warn('[Auth API] Backend unavailable, falling back to local memory store:', err);
+      console.warn('[Supabase Auth] Client error, checking local fallback:', err);
     } finally {
       setLoading(false);
     }
 
-    // Fallback Local Memory / Offline Storage Validation
+    // Fallback Local Memory Validation if Supabase is offline
     const users = getUsers();
-
     if (isLogin) {
-      const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+      const user = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password);
       if (user) {
         setCurrentUser(user);
         setSuccess('Authenticated in offline cache mode.');
@@ -111,7 +111,7 @@ export default function Auth({ onAuthSuccess }) {
         setError('Invalid email or password.');
       }
     } else {
-      const userExists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
+      const userExists = users.some(u => u.email.toLowerCase() === email.trim().toLowerCase());
       if (userExists) {
         setError('An account with this email already exists.');
         return;
@@ -119,18 +119,16 @@ export default function Auth({ onAuthSuccess }) {
 
       const newUser = {
         id: `user-${Date.now()}`,
-        email,
+        email: email.trim(),
         password,
-        name,
+        name: name.trim(),
         role: 'Warehouse Manager'
       };
 
       saveUser(newUser);
       setCurrentUser(newUser);
-      setSuccess('Account created successfully in local cache! Logging you in...');
-      setTimeout(() => {
-        onAuthSuccess(newUser);
-      }, 800);
+      setSuccess('Account created locally! Logging you in...');
+      setTimeout(() => onAuthSuccess(newUser), 600);
     }
   };
 
@@ -140,25 +138,32 @@ export default function Auth({ onAuthSuccess }) {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'admin@aetherwms.com', password: 'password123' })
+      // Try Supabase guest sign in if configured
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: 'admin@aetherwms.com',
+        password: 'password123'
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        localStorage.setItem('wms_auth_token', data.token);
-        setCurrentUser(data.user);
-        setSuccess('Guest demo logged in via SQLite database!');
-        setTimeout(() => onAuthSuccess(data.user), 500);
+
+      if (!error && data?.user) {
+        const userObj = {
+          id: data.user.id,
+          email: 'admin@aetherwms.com',
+          name: 'Alex Chief (Admin)',
+          role: 'System Administrator',
+          ...data.user
+        };
+        setCurrentUser(userObj);
+        setSuccess('Guest demo logged in via Supabase!');
+        setTimeout(() => onAuthSuccess(userObj), 400);
         return;
       }
     } catch (err) {
-      console.warn('[Auth API] Guest login falling back to local cache:', err);
+      console.warn('[Supabase Guest Auth] Falling back to demo session:', err);
     } finally {
       setLoading(false);
     }
 
+    // Instant local demo session
     const users = getUsers();
     const guestUser = users.find(u => u.email === 'admin@aetherwms.com');
     if (guestUser) {
@@ -166,7 +171,7 @@ export default function Auth({ onAuthSuccess }) {
       onAuthSuccess(guestUser);
     } else {
       const defaultGuest = {
-        id: 'user-admin-sqlite',
+        id: 'user-admin-demo',
         email: 'admin@aetherwms.com',
         name: 'Alex Chief (Admin)',
         role: 'System Administrator'
@@ -255,8 +260,8 @@ export default function Auth({ onAuthSuccess }) {
             />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={styles.submitBtn}>
-            {isLogin ? 'Sign In' : 'Create Account'}
+          <button type="submit" className="btn btn-primary" style={styles.submitBtn} disabled={loading}>
+            {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
           </button>
         </form>
 
@@ -269,6 +274,7 @@ export default function Auth({ onAuthSuccess }) {
           onClick={handleGuestLogin}
           className="btn btn-secondary"
           style={styles.guestBtn}
+          disabled={loading}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -282,11 +288,11 @@ export default function Auth({ onAuthSuccess }) {
         <div style={styles.footer}>
           {isLogin ? (
             <p style={styles.footerText}>
-              Testing credentials: <code style={styles.code}>admin@aetherwms.com</code> / <code style={styles.code}>password123</code>
+              Demo credentials: <code style={styles.code}>admin@aetherwms.com</code> / <code style={styles.code}>password123</code>
             </p>
           ) : (
             <p style={styles.footerText}>
-              Passwords are stored safely in local memory for offline validation.
+              Registering creates your account securely in Supabase.
             </p>
           )}
         </div>
