@@ -69,21 +69,34 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
   // Helper to find the primary cell that covers a coordinate (if merged)
   const getCoveringCell = (cellsMap, coord) => {
+    if (!cellsMap || !coord) return null;
     // O(1) fast-path: direct coveredBy pointer (works for all shapes — rect and irregular)
     const directCell = cellsMap[coord];
-    if (directCell?.coveredBy) {
-      const primaryCoord = directCell.coveredBy;
+    if (directCell?.coveredBy || directCell?.parentCellId) {
+      const primaryCoord = directCell.coveredBy || directCell.parentCellId;
       const primaryCell = cellsMap[primaryCoord];
       if (primaryCell) return { primaryCoord, cell: primaryCell };
+      return { primaryCoord, cell: { coordinate: primaryCoord, rowSpan: 1, colSpan: 1 } };
     }
 
-    // Legacy bounding-box fallback — ONLY for old rectangular merged cells that
-    // pre-date the explicit mergedCoords/coveredBy system (i.e. no mergedCoords stored).
-    // Cells with mergedCoords use the coveredBy pointer path above, so this path
-    // will NEVER incorrectly claim coverage of out-of-shape coords (e.g. the
-    // "missing corner" of an L-shape).
-    for (const [key, cell] of Object.entries(cellsMap || {})) {
-      if ((cell.rowSpan > 1 || cell.colSpan > 1) && !cell.mergedCoords && key !== coord) {
+    // Check if any primary cell explicitly lists this coord in its mergedCoords (or numeric format)
+    for (const [key, cell] of Object.entries(cellsMap)) {
+      if (key !== coord && Array.isArray(cell?.mergedCoords)) {
+        if (cell.mergedCoords.includes(coord)) {
+          return { primaryCoord: key, cell };
+        }
+        // Also check if mergedCoords had numeric row "0-1" while coord is "A-1"
+        const [rowLabel, colStr] = coord.split('-');
+        const rIdx = getRowIndex(rowLabel);
+        if (cell.mergedCoords.includes(`${rIdx}-${colStr}`)) {
+          return { primaryCoord: key, cell };
+        }
+      }
+    }
+
+    // Bounding-box fallback — for rectangular merged cells without mergedCoords or missing coveredBy
+    for (const [key, cell] of Object.entries(cellsMap)) {
+      if ((cell?.rowSpan > 1 || cell?.colSpan > 1) && key !== coord) {
         const [rowLabel, colStr] = key.split('-');
         const rStart = getRowIndex(rowLabel);
         const cStart = parseInt(colStr, 10) - 1;
@@ -108,8 +121,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       if (covering) {
         const mc = covering.cell.mergedCoords;
         if (mc && mc.length > 0) {
-          // Precise expansion: include exactly the cells in the merged shape
-          mc.forEach(c => expanded.add(c));
+          // Precise expansion: include exactly the cells in the merged shape, normalizing numeric rows
+          mc.forEach(c => {
+            const [cR, cC] = (c || '').split('-');
+            if (!isNaN(Number(cR))) {
+              expanded.add(`${getRowLabel(Number(cR))}-${cC}`);
+            } else {
+              expanded.add(c);
+            }
+          });
         } else {
           // Legacy bounding-box expansion for old-format data
           const [rowLabel, colStr] = covering.primaryCoord.split('-');
@@ -476,10 +496,15 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
     const finalIsObstacle = finalType === 'Obstacle';
     const finalIsPath = finalType === 'Path/Road' || finalType === 'Path';
 
-    // Apply merge: each non-primary coord gets a coveredBy pointer
+    // Apply merge: each non-primary coord gets a coveredBy pointer and parentCellId
     selectedCoords.forEach(coord => {
       if (coord !== primaryCoord) {
-        updatedCells[coord] = { coordinate: coord, coveredBy: primaryCoord };
+        updatedCells[coord] = {
+          coordinate: coord,
+          coveredBy: primaryCoord,
+          parentCellId: primaryCoord,
+          isMerged: true
+        };
       }
     });
 
@@ -503,6 +528,7 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
       colSpan: finalColSpan,
       mergedCoords: [...selectedCoords],
       isIrregular,
+      isMerged: true,
       ...(finalIsRefrigerated ? { isRefrigerated: true } : {}),
       ...(finalIsObstacle ? { isObstacle: true } : {}),
       ...(finalIsPath ? { isPath: true } : {})
@@ -560,9 +586,10 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
     let primaryCoord = null;
     for (const coord of selectedCoords) {
-      const c = cells[coord];
-      if (c && (c.rowSpan > 1 || c.colSpan > 1 || c.mergedCoords?.length > 0)) {
-        primaryCoord = coord;
+      const covering = getCoveringCell(cells, coord);
+      const c = covering ? covering.cell : cells[coord];
+      if (c && (c.rowSpan > 1 || c.colSpan > 1 || c.mergedCoords?.length > 1 || c.mergedCoords?.length > 0)) {
+        primaryCoord = covering ? covering.primaryCoord : coord;
         break;
       }
     }
@@ -932,17 +959,24 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
               </button>
             )}
 
-            {/* Unmerge merged cell — detects both old rowSpan and new mergedCoords */}
-            {selectedCoords.length === 1 && cells[selectedCoords[0]] &&
-              (cells[selectedCoords[0]].rowSpan > 1 || cells[selectedCoords[0]].colSpan > 1 || cells[selectedCoords[0]].mergedCoords?.length > 0) && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
-                  onClick={handleUnmergeSelectedCell}
-                >
-                  🔓 Unmerge
-                </button>
-              )}
+            {/* Unmerge merged cell — detects both old rowSpan and new mergedCoords or covered sub-cells */}
+            {(() => {
+              if (selectedCoords.length === 0) return null;
+              const covering = getCoveringCell(cells, selectedCoords[0]);
+              const targetCell = covering ? covering.cell : cells[selectedCoords[0]];
+              if (targetCell && (targetCell.rowSpan > 1 || targetCell.colSpan > 1 || targetCell.mergedCoords?.length > 1)) {
+                return (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                    onClick={handleUnmergeSelectedCell}
+                  >
+                    🔓 Unmerge
+                  </button>
+                );
+              }
+              return null;
+            })()}
 
             {/* Remove Cells (only non-removed cells selected) */}
             {!selectedCoords.every(c => cells[c]?.isRemoved) && (
@@ -1593,9 +1627,40 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                   }
 
                   const covering = getCoveringCell(cells, coordinate);
-                  const primaryCoord = covering ? covering.primaryCoord : coordinate;
+                  const primaryCoord = covering ? covering.primaryCoord : (cell?.coveredBy || cell?.parentCellId || coordinate);
+                  if (primaryCoord && primaryCoord !== coordinate) {
+                    // Item 2: This cell is a sub-cell (covered by another cell's span or parent_cell_id).
+                    // Skip in the .map() array / return null so it does not render as a separate ghost element beneath the main block.
+                    return null;
+                  }
+
                   const primaryCellData = cells[primaryCoord] || cell;
-                  const shapeCoords = primaryCellData.mergedCoords || [primaryCoord];
+
+                  let shapeCoords = primaryCellData.mergedCoords;
+                  if (Array.isArray(shapeCoords) && shapeCoords.length > 1) {
+                    shapeCoords = shapeCoords.map(sc => {
+                      const [scR, scC] = (sc || '').split('-');
+                      if (!isNaN(Number(scR))) {
+                        return `${getRowLabel(Number(scR))}-${scC}`;
+                      }
+                      return sc;
+                    });
+                  }
+                  if (!Array.isArray(shapeCoords) || shapeCoords.length <= 1) {
+                    if ((primaryCellData.rowSpan || 1) > 1 || (primaryCellData.colSpan || 1) > 1) {
+                      const [pRStr, pCStr] = (primaryCoord || '').split('-');
+                      const pR = getRowIndex(pRStr);
+                      const pC = parseInt(pCStr, 10) || 1;
+                      shapeCoords = [];
+                      for (let dr = 0; dr < (primaryCellData.rowSpan || 1); dr++) {
+                        for (let dc = 0; dc < (primaryCellData.colSpan || 1); dc++) {
+                          shapeCoords.push(`${getRowLabel(pR + dr)}-${pC + dc}`);
+                        }
+                      }
+                    } else {
+                      shapeCoords = [primaryCoord];
+                    }
+                  }
                   const isMergedShape = shapeCoords.length > 1;
                   const shapeSet = new Set(shapeCoords);
 
@@ -1605,10 +1670,6 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                   const hasBottom = sides.bottom;
                   const hasLeft = sides.left;
                   const hasRight = sides.right;
-
-                  // Calculate the centroid sub-cell coordinate where all metadata / labels must be centered
-                  const centroidCoord = getCentroidCoord(shapeCoords) || primaryCoord;
-                  const isCentroid = coordinate === centroidCoord;
 
                   const stats = getCellStats(primaryCoord);
                   const isSelected = selectedCoords.some(c => shapeSet.has(c));
@@ -1621,24 +1682,43 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
 
                   const mergedCellCount = shapeCoords.length;
 
-                  // Outer borders strictly on the external boundary of the shape; interior borders eliminated (`none`)
+                  let computedRowSpan = primaryCellData.rowSpan || 1;
+                  let computedColSpan = primaryCellData.colSpan || 1;
+                  if (isMergedShape) {
+                    let minR = Infinity, maxR = -Infinity;
+                    let minC = Infinity, maxC = -Infinity;
+                    shapeCoords.forEach(c => {
+                      const [rL, cS] = c.split('-');
+                      const rIndex = getRowIndex(rL);
+                      const colIndex = parseInt(cS, 10) || 1;
+                      if (rIndex < minR) minR = rIndex; if (rIndex > maxR) maxR = rIndex;
+                      if (colIndex < minC) minC = colIndex; if (colIndex > maxC) maxC = colIndex;
+                    });
+                    if (minR !== Infinity) {
+                      computedRowSpan = maxR - minR + 1;
+                      computedColSpan = maxC - minC + 1;
+                    }
+                  }
+
+                  const gridRowSpanVal = isMergedShape ? computedRowSpan : 1;
+                  const gridColSpanVal = isMergedShape ? computedColSpan : 1;
+
+                  // Outer borders cleanly applied around the container
                   const outerBorderColor = isSelected ? 'var(--primary)' : (stats.isRefrigerated ? '#38bdf8' : capStyle.border);
-                  const borderTopStyle = hasTop ? 'none' : `1px solid ${outerBorderColor}`;
-                  const borderBottomStyle = hasBottom ? 'none' : `1px solid ${outerBorderColor}`;
-                  const borderLeftStyle = hasLeft ? 'none' : `1px solid ${outerBorderColor}`;
-                  const borderRightStyle = hasRight ? 'none' : `1px solid ${outerBorderColor}`;
+                  const borderTopStyle = `1px solid ${outerBorderColor}`;
+                  const borderBottomStyle = `1px solid ${outerBorderColor}`;
+                  const borderLeftStyle = `1px solid ${outerBorderColor}`;
+                  const borderRightStyle = `1px solid ${outerBorderColor}`;
 
-                  // Bridge the 0.75rem (12px) grid gap on connected interior edges so adjacent tiles physically meet and fuse into ONE solid block!
-                  const marginRight = (isMergedShape && hasRight) ? '-0.75rem' : '0';
-                  const paddingRight = (isMergedShape && hasRight) ? '0.75rem' : '0';
-                  const marginBottom = (isMergedShape && hasBottom) ? '-0.75rem' : '0';
-                  const paddingBottom = (isMergedShape && hasBottom) ? '0.75rem' : '0';
+                  const marginRight = '0';
+                  const paddingRight = '0';
+                  const marginBottom = '0';
+                  const paddingBottom = '0';
 
-                  // Outer rounded corners strictly on the outer perimeter of the composite shape
-                  const borderTopLeftRadius = (!hasTop && !hasLeft) ? '12px' : '0px';
-                  const borderTopRightRadius = (!hasTop && !hasRight) ? '12px' : '0px';
-                  const borderBottomRightRadius = (!hasBottom && !hasRight) ? '12px' : '0px';
-                  const borderBottomLeftRadius = (!hasBottom && !hasLeft) ? '12px' : '0px';
+                  const borderTopLeftRadius = '12px';
+                  const borderTopRightRadius = '12px';
+                  const borderBottomRightRadius = '12px';
+                  const borderBottomLeftRadius = '12px';
 
                   // Background derivation
                   let cellBg = capStyle.bg;
@@ -1656,54 +1736,6 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                     cellBg = isSelected
                       ? 'rgba(100,116,139,0.25)'
                       : 'repeating-linear-gradient(90deg, rgba(30,41,59,0.6), rgba(30,41,59,0.6) 15px, rgba(51,65,85,0.3) 15px, rgba(51,65,85,0.3) 30px)';
-                  }
-
-                  // Non-centroid sub-cell inside a merged block: render clean fused background
-                  if (!isCentroid) {
-                    return (
-                      <div
-                        key={coordinate}
-                        onMouseDown={(e) => handleCellMouseDown(coordinate, e)}
-                        onMouseEnter={() => handleCellMouseEnter(coordinate)}
-                        onClick={() => handleCellClick(primaryCoord)}
-                        onDoubleClick={() => onCellClick(primaryCoord, primaryCellData)}
-                        title={`Merged sub-cell (${coordinate}) of shape anchored at ${primaryCoord}`}
-                        style={{
-                          ...styles.gridCell,
-                          gridRowStart: r + 2,
-                          gridRowEnd: r + 3,
-                          gridColumnStart: c + 2,
-                          gridColumnEnd: c + 3,
-                          background: cellBg,
-                          borderTop: borderTopStyle,
-                          borderBottom: borderBottomStyle,
-                          borderLeft: borderLeftStyle,
-                          borderRight: borderRightStyle,
-                          borderTopLeftRadius,
-                          borderTopRightRadius,
-                          borderBottomRightRadius,
-                          borderBottomLeftRadius,
-                          marginRight,
-                          paddingRight,
-                          marginBottom,
-                          paddingBottom,
-                          zIndex: isSelected || isHovered ? 15 : 2,
-                          boxShadow: isSelected ? '0 0 0 2px var(--primary)' : 'none',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'flex-start',
-                          paddingTop: '0.35rem',
-                          paddingLeft: '0.35rem',
-                          overflow: 'hidden'
-                        }}
-                        className={`grid-cell-card ${isSelected ? 'selected' : ''}`}
-                      >
-                        <span style={{ fontSize: '0.62rem', fontFamily: 'monospace', fontWeight: '600', color: stats.isRefrigerated ? '#38bdf8' : stats.isObstacle ? 'var(--warning)' : 'var(--text-muted)', opacity: 0.45 }}>
-                          {row}{col}
-                        </span>
-                      </div>
-                    );
                   }
 
                   // Centroid cell: render full rich content, centered labels, and badges
@@ -1730,10 +1762,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                         onClick={() => handleCellClick(primaryCoord)}
                         style={{
                           ...styles.gridCell,
+                          gridRow: `span ${gridRowSpanVal}`,
+                          gridColumn: `span ${gridColSpanVal}`,
                           gridRowStart: r + 2,
-                          gridRowEnd: r + 3,
+                          gridRowEnd: r + 2 + gridRowSpanVal,
                           gridColumnStart: c + 2,
-                          gridColumnEnd: c + 3,
+                          gridColumnEnd: c + 2 + gridColSpanVal,
                           background: cellBg,
                           borderTop: borderTopStyle,
                           borderBottom: borderBottomStyle,
@@ -1780,10 +1814,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                         onClick={() => handleCellClick(primaryCoord)}
                         style={{
                           ...styles.gridCell,
+                          gridRow: `span ${gridRowSpanVal}`,
+                          gridColumn: `span ${gridColSpanVal}`,
                           gridRowStart: r + 2,
-                          gridRowEnd: r + 3,
+                          gridRowEnd: r + 2 + gridRowSpanVal,
                           gridColumnStart: c + 2,
-                          gridColumnEnd: c + 3,
+                          gridColumnEnd: c + 2 + gridColSpanVal,
                           background: cellBg,
                           borderTop: borderTopStyle,
                           borderBottom: borderBottomStyle,
@@ -1830,10 +1866,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                         onClick={() => handleCellClick(primaryCoord)}
                         style={{
                           ...styles.gridCell,
+                          gridRow: `span ${gridRowSpanVal}`,
+                          gridColumn: `span ${gridColSpanVal}`,
                           gridRowStart: r + 2,
-                          gridRowEnd: r + 3,
+                          gridRowEnd: r + 2 + gridRowSpanVal,
                           gridColumnStart: c + 2,
-                          gridColumnEnd: c + 3,
+                          gridColumnEnd: c + 2 + gridColSpanVal,
                           background: cellBg,
                           borderTop: borderTopStyle,
                           borderBottom: borderBottomStyle,
@@ -1897,10 +1935,12 @@ export default function WarehouseGrid({ warehouse, onCellClick, onEditLayoutClic
                       onClick={() => handleCellClick(primaryCoord)}
                       style={{
                         ...styles.gridCell,
+                        gridRow: `span ${gridRowSpanVal}`,
+                        gridColumn: `span ${gridColSpanVal}`,
                         gridRowStart: r + 2,
-                        gridRowEnd: r + 3,
+                        gridRowEnd: r + 2 + gridRowSpanVal,
                         gridColumnStart: c + 2,
-                        gridColumnEnd: c + 3,
+                        gridColumnEnd: c + 2 + gridColSpanVal,
                         backgroundColor: cellBg,
                         borderTop: borderTopStyle,
                         borderBottom: borderBottomStyle,
