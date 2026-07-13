@@ -1,5 +1,34 @@
 import React, { useState } from 'react';
 import { getUsers, saveUser, setCurrentUser } from '../utils/storage';
+import { supabase } from '../utils/supabaseClient';
+
+async function handleSignUp(email, password) {
+  const { data, error } = await supabase.auth.signUp({
+    email: email,
+    password: password,
+  });
+
+  if (error) {
+    alert(error.message);
+  } else {
+    // Pass the signed-up user object up to your handleAuthSuccess in App.jsx
+    onAuthSuccess(data.user);
+  }
+}
+
+async function handleSignIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email,
+    password: password,
+  });
+
+  if (error) {
+    alert(error.message);
+  } else {
+    // Pass the logged-in user object up to your handleAuthSuccess in App.jsx
+    onAuthSuccess(data.user);
+  }
+}
 
 export default function Auth({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);

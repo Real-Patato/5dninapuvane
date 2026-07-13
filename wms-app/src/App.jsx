@@ -11,7 +11,6 @@ import {
   saveCustomFields,
   updateCellProducts
 } from './utils/storage';
-
 import LandingPage from './components/LandingPage';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
@@ -20,14 +19,13 @@ import CellModal from './components/CellModal';
 import CustomFieldsConfig from './components/CustomFieldsConfig';
 import CreateWarehouseModal from './components/CreateWarehouseModal';
 import DeleteWarehouseModal from './components/DeleteWarehouseModal';
-
 import './App.css';
 
 export default function App() {
   // Navigation & session states
   const [page, setPage] = useState('landing'); // 'landing', 'auth', 'dashboard'
   const [currentUser, setLocalCurrentUser] = useState(null);
-  
+
   // Data states
   const [warehouses, setWarehouses] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
@@ -35,7 +33,7 @@ export default function App() {
 
   // Dashboard Sub-navigation
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'custom-fields'
-  
+
   // Modals state
   const [isCreateWarehouseOpen, setIsCreateWarehouseOpen] = useState(false);
   const [warehouseToEdit, setWarehouseToEdit] = useState(null);
@@ -45,31 +43,33 @@ export default function App() {
   // Theme states
   const [isDarkTheme, setIsDarkTheme] = useState(true);
 
-  // Initialize Storage & Active Session
+  // FIX 1: Run only ONCE on mount by stripping [currentUser] from dependencies
   useEffect(() => {
-    initializeStorage();
-    const sessionUser = getCurrentUser();
-    if (sessionUser) {
-      setLocalCurrentUser(sessionUser);
-      setPage('dashboard');
-    }
+    async function loadSessionAndData() {
+      // Optional: Initialize storage if your utils layer requires it
+      if (typeof initializeStorage === 'function') {
+        await initializeStorage();
+      }
 
-    // Load data from Storage
-    const allWarehouses = getWarehouses();
-    setWarehouses(allWarehouses);
-    if (allWarehouses.length > 0) {
-      setSelectedWarehouse(allWarehouses[0]);
-    }
+      const sessionUser = getCurrentUser();
+      if (sessionUser) {
+        setLocalCurrentUser(sessionUser);
+        setPage('dashboard');
 
-    const allCustomFields = getCustomFields();
-    setCustomFields(allCustomFields);
+        const allWarehouses = await getWarehouses();
+        setWarehouses(allWarehouses);
+        if (allWarehouses.length > 0) {
+          setSelectedWarehouse(allWarehouses[0]);
+        }
+      }
 
-    // Load theme from localStorage
-    const savedTheme = localStorage.getItem('wms_theme');
-    if (savedTheme === 'light') {
-      setIsDarkTheme(false);
+      // Load custom fields since they were forgotten during initialization
+      const fields = await getCustomFields();
+      if (fields) setCustomFields(fields);
     }
+    loadSessionAndData();
   }, []);
+
 
   // Theme effect toggler
   useEffect(() => {
@@ -82,9 +82,13 @@ export default function App() {
     }
   }, [isDarkTheme]);
 
-  const handleAuthSuccess = (user) => {
+  // FIX 2: Turned this into an async function to properly handle the promise out of getWarehouses
+  const handleAuthSuccess = async (user) => {
     setLocalCurrentUser(user);
-    const allWarehouses = getWarehouses().filter(w => w.userId === user.id || w.id.startsWith('wh-')); // Include defaults too
+
+    const fetchedWarehouses = await getWarehouses();
+    const allWarehouses = fetchedWarehouses.filter(w => w.userId === user.id || w.id.startsWith('wh-'));
+
     setWarehouses(allWarehouses);
     if (allWarehouses.length > 0) {
       setSelectedWarehouse(allWarehouses[0]);
@@ -94,13 +98,15 @@ export default function App() {
     setPage('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const { supabase } = await import('./utils/supabaseClient');
+    await supabase.auth.signOut();
     setCurrentUser(null);
     setLocalCurrentUser(null);
     setPage('landing');
   };
 
-  const handleCreateWarehouse = (whData) => {
+  const handleCreateWarehouse = async (whData) => {
     const newWh = {
       id: `wh-${Date.now()}`,
       userId: currentUser?.id || 'guest',
@@ -110,16 +116,17 @@ export default function App() {
       cells: {}
     };
 
-    const updated = addWarehouse(newWh);
-    
-    // Refresh states
+    await addWarehouse(newWh);
+
+    const updated = await getWarehouses();
     setWarehouses(updated);
-    setSelectedWarehouse(newWh);
+    setSelectedWarehouse(updated.find(w => w.id === newWh.id) || newWh);
     setIsCreateWarehouseOpen(false);
   };
 
-  const handleUpdateWarehouseLayout = (whData) => {
+  const handleUpdateWarehouseLayout = async (whData) => {
     if (!warehouseToEdit) return;
+
     const updated = warehouses.map(wh => {
       if (wh.id === warehouseToEdit.id) {
         return {
@@ -135,7 +142,6 @@ export default function App() {
     setWarehouses(updated);
     saveWarehouses(updated);
 
-    // Update active selected warehouse state
     const currentWh = updated.find(w => w.id === warehouseToEdit.id);
     if (currentWh) {
       setSelectedWarehouse(currentWh);
@@ -151,27 +157,26 @@ export default function App() {
     setSelectedWarehouse(updatedWh);
   };
 
-  const handleSaveCellData = (coordinate, cellInfo) => {
+  const handleSaveCellData = async (coordinate, cellInfo) => {
     if (!selectedWarehouse) return;
 
-    const updatedWhs = updateCellProducts(selectedWarehouse.id, coordinate, cellInfo);
-    setWarehouses(updatedWhs);
+    await updateCellProducts(selectedWarehouse.id, coordinate, cellInfo);
 
-    // Update active selected warehouse state
-    const currentWh = updatedWhs.find(w => w.id === selectedWarehouse.id);
+    const refreshedWarehouses = await getWarehouses();
+    setWarehouses(refreshedWarehouses);
+
+    const currentWh = refreshedWarehouses.find(w => w.id === selectedWarehouse.id);
     if (currentWh) {
       setSelectedWarehouse(currentWh);
     }
   };
 
-  const handleSaveCustomFields = (updatedFields) => {
-    saveCustomFields(updatedFields);
-    setCustomFields(updatedFields);
-  };
-
-  const handleDeleteWarehouse = () => {
+  const handleDeleteWarehouse = async () => {
     if (!selectedWarehouse) return;
-    const updated = deleteWarehouse(selectedWarehouse.id);
+
+    await deleteWarehouse(selectedWarehouse.id);
+
+    const updated = await getWarehouses();
     setWarehouses(updated);
     setSelectedWarehouse(updated.length > 0 ? updated[0] : null);
     setIsDeleteWarehouseOpen(false);
@@ -198,7 +203,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Sidebar Navigation */}
       <Sidebar
         warehouses={warehouses}
         selectedWarehouse={selectedWarehouse}
@@ -213,7 +217,6 @@ export default function App() {
         onToggleTheme={toggleTheme}
       />
 
-      {/* Main Panel Viewport */}
       <main className="main-content">
         {activeTab === 'grid' ? (
           <WarehouseGrid
@@ -233,7 +236,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Modals Overlay portals */}
       {isCreateWarehouseOpen && (
         <CreateWarehouseModal
           onClose={() => {
